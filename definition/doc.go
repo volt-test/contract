@@ -73,7 +73,16 @@
 // schema/test-definition.schema.json describes v2 definitions. It is
 // necessary, not sufficient: every definition Parse accepts as v2 passes
 // the schema (data_download_url aside), but Parse is stricter. It also
-// checks durations, URL forms, unique names and parts of the load model.
+// checks durations, URL forms, unique names, parts of the load model, and
+// threshold expressions and their scopes.
+//
+// # Thresholds (v2)
+//
+// The test, each scenario and each step can carry thresholds: expression
+// strings such as "p95 < 500ms", or objects with abort settings. Parse
+// checks each expression with thresholds.Parse and its scope with
+// ValidFor; Bounds returns them with the scenario and step each applies
+// to. v1 readers ignore thresholds, and so does Parse on the v1 path.
 //
 // # Load model (v2)
 //
@@ -82,5 +91,6 @@
 // scenario once. A duration that is present must be greater than zero, and
 // so must every stage duration.
 //
-// This package imports only the standard library.
+// Outside the standard library, this package imports only the thresholds
+// package of this module.
 package definition

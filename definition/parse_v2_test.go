@@ -45,6 +45,7 @@ var unknownFixtures = map[string][]string{
 	"unknown_v1_weights_report_type.json": {"report_type", "weights"},
 	"unknown_v1_cli_keys.json":            {"api_key", "cloud", "cloud_timeout", "existing_test_id", "skip_lookup"},
 	"unknown_multiple.json":               {"alpha", "scenarios[0].steps[0].think", "scenarios[1].steps[0].request.retries", "target.proxy", "zeta"},
+	"unknown_threshold_key.json":          {"thresholds[1].abort_on_fial"},
 }
 
 func TestV2UnknownFields(t *testing.T) {
@@ -297,6 +298,53 @@ func TestV2Problems(t *testing.T) {
 			`scenarios[0].data_config.mode: is required (one of "sequential", "random", "unique")`,
 			"scenarios[0].data_config.data_source: is required",
 		}},
+		// Thresholds.
+		{"threshold not an array", func(m map[string]any) { m["thresholds"] = "p95 < 1s" }, []string{"thresholds: must be an array"}},
+		{"null threshold", func(m map[string]any) { m["thresholds"] = []any{"p95 < 1s", nil} }, []string{"thresholds[1]: must not be null"}},
+		{"number threshold", func(m map[string]any) { scenario0(m)["thresholds"] = []any{5} },
+			[]string{"scenarios[0].thresholds[0]: must be a string or an object"}},
+		{"threshold object types", func(m map[string]any) {
+			step0(m)["thresholds"] = []any{map[string]any{"expr": 5, "abort_on_fail": "yes", "delay_abort": 10}}
+		}, []string{
+			"scenarios[0].steps[0].thresholds[0].abort_on_fail: must be true or false",
+			"scenarios[0].steps[0].thresholds[0].delay_abort: must be a string",
+			"scenarios[0].steps[0].thresholds[0].expr: must be a string",
+		}},
+		{"threshold expressions at every scope", func(m map[string]any) {
+			m["thresholds"] = []any{"p95 < 500"}
+			scenario0(m)["thresholds"] = []any{"p95 < 1s", map[string]any{"expr": "error_rate < 5", "abort_on_fail": true}}
+			step0(m)["thresholds"] = []any{"p95 < 1s", "iterations > 1", "iteration_duration_p95 < 1s", "p99.99 < 1s"}
+		}, []string{
+			`thresholds[0]: invalid threshold "p95 < 500": p95 is a duration and needs a unit (us, ms, s or m); did you mean "500ms"? (at offset 6)`,
+			`scenarios[0].thresholds[1]: invalid threshold "error_rate < 5": error_rate is a rate and needs "%"; did you mean "5%"? (at offset 13)`,
+			"scenarios[0].steps[0].thresholds[1]: iterations is not available on a step; use it on the test or a scenario",
+			"scenarios[0].steps[0].thresholds[2]: iteration_duration_p95 is not available on a step; use it on the test or a scenario",
+			`scenarios[0].steps[0].thresholds[3]: invalid threshold "p99.99 < 1s": unknown metric "p99.99"; the percentiles are p50, p75, p90, p95, p99 and p99.9 (at offset 0)`,
+		}},
+		{"threshold without expr", func(m map[string]any) { m["thresholds"] = []any{map[string]any{"abort_on_fail": true}, ""} }, []string{
+			`thresholds[0]: invalid threshold "": the expression is empty; write <metric> <operator> <value>, e.g. "p95 < 500ms" (at offset 0)`,
+			`thresholds[1]: invalid threshold "": the expression is empty; write <metric> <operator> <value>, e.g. "p95 < 500ms" (at offset 0)`,
+		}},
+		{"delay_abort", func(m map[string]any) {
+			m["thresholds"] = []any{
+				map[string]any{"expr": "p95 < 1s", "abort_on_fail": true, "delay_abort": "soon"},
+				map[string]any{"expr": "p95 < 1s", "abort_on_fail": true, "delay_abort": "-1s"},
+				map[string]any{"expr": "p95 < 1s", "delay_abort": "1s"},
+				map[string]any{"expr": "p95 < 1s", "abort_on_fail": false, "delay_abort": "0s"},
+			}
+		}, []string{
+			`thresholds[0].delay_abort: must be a duration such as "30s" or "1m30s", got "soon"`,
+			"thresholds[1].delay_abort: must not be negative",
+			"thresholds[2].delay_abort: only applies with abort_on_fail: true",
+			"thresholds[3].delay_abort: only applies with abort_on_fail: true",
+		}},
+		{"thresholds valid at their scopes", func(m map[string]any) {
+			m["thresholds"] = []any{"iterations > 1", "dropped_iterations == 0", "iteration_duration < 2s", map[string]any{"expr": "p95<1s", "abort_on_fail": true, "delay_abort": "0s"}}
+			scenario0(m)["thresholds"] = []any{"iteration_duration_p99.9 < 2s", map[string]any{"expr": "failed == 0"},
+				map[string]any{"expr": "p95<1s", "delay_abort": ""}, map[string]any{"expr": "p95<1s", "abort_on_fail": false, "delay_abort": ""}}
+			step0(m)["thresholds"] = []any{"ttfb < 100ms", "bytes_sent<=1kib", "rps>1", "check_rate == 100%"}
+		}, nil},
+
 		{"data_download_url alone is a source", func(m map[string]any) {
 			scenario0(m)["data_config"] = map[string]any{"data_format": "csv", "mode": "random", "data_download_url": "https://storage.example.com/x.csv"}
 		}, nil},
@@ -491,11 +539,13 @@ func TestV2RoundTrip(t *testing.T) {
 		HTTPDebug:     true,
 		Target:        &definition.Target{URL: "https://a", IdleTimeout: "1m", BaseURL: "${base}"},
 		RegionConfig:  []definition.RegionWeight{{Region: "us", Weight: 2}},
+		Thresholds:    []definition.Threshold{{Expr: "p95 < 1s"}, {Expr: "error_rate < 1%", AbortOnFail: true, DelayAbort: "10s"}},
 		Scenarios: []definition.Scenario{{
 			Name: "s", Description: "x", Weight: 3, ThinkTime: "1s", AutoHandleCookies: true,
+			Thresholds: []definition.Threshold{{Expr: "iterations > 1", AbortOnFail: true}},
 			DataConfig: &definition.DataConfig{DataSource: "a.csv", DataContent: "YQ==", DataFormat: "csv", HasHeader: true, Mode: "unique"},
 			Steps: []definition.Step{{
-				Name: "a", ThinkTime: "1ms",
+				Name: "a", ThinkTime: "1ms", Thresholds: []definition.Threshold{{Expr: "ttfb_p99.9 <= 50ms"}},
 				Request: definition.Request{Method: "POST", URL: "/a", Body: "{}", Headers: map[string]string{"A": "b"}},
 				Extract: []definition.Extract{{VariableName: "v", Selector: "p", Attribute: "href", Type: "html"}},
 			}},

@@ -177,6 +177,13 @@
         "data_config": {
           "$ref": "#/$defs/DataConfig",
           "description": "CSV data whose columns fill ${column} variables."
+        },
+        "thresholds": {
+          "items": {
+            "$ref": "#/$defs/Threshold"
+          },
+          "type": "array",
+          "description": "Pass/fail rules for this scenario, e.g. \"iteration_duration_p95 \u003c 5s\"."
         }
       },
       "additionalProperties": false,
@@ -228,6 +235,13 @@
         "think_time": {
           "type": "string",
           "description": "Pause after the step, e.g. \"500ms\"."
+        },
+        "thresholds": {
+          "items": {
+            "$ref": "#/$defs/Threshold"
+          },
+          "type": "array",
+          "description": "Pass/fail rules for this step, e.g. \"p99 \u003c 1s\"."
         }
       },
       "additionalProperties": false,
@@ -256,6 +270,62 @@
       "additionalProperties": false,
       "type": "object",
       "description": "The system under test."
+    },
+    "Threshold": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "description": "The expression alone, e.g. \"p95 \u003c 500ms\"."
+        },
+        {
+          "dependentSchemas": {
+            "delay_abort": {
+              "anyOf": [
+                {
+                  "properties": {
+                    "delay_abort": {
+                      "maxLength": 0
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "abort_on_fail": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "abort_on_fail"
+                  ]
+                }
+              ]
+            }
+          },
+          "properties": {
+            "expr": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Threshold expression: a metric, an operator and a value, e.g.\n\"p95 \u003c 500ms\" or \"error_rate \u003c 1%\"."
+            },
+            "abort_on_fail": {
+              "type": "boolean",
+              "description": "Stop the test as soon as the threshold fails. Accepted by the format;\nwhether an engine acts on it depends on the engine release."
+            },
+            "delay_abort": {
+              "type": "string",
+              "description": "Grace period from the start of the test during which a failing\nthreshold does not abort it, e.g. \"30s\". Requires abort_on_fail."
+            }
+          },
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "expr"
+          ],
+          "description": "The expression with abort settings."
+        }
+      ],
+      "description": "A pass/fail rule: an expression such as \"p95 \u003c 500ms\", or an object with the expression and abort settings."
     }
   },
   "anyOf": [
@@ -343,6 +413,13 @@
       },
       "type": "array",
       "description": "Share of the virtual users per cloud region."
+    },
+    "thresholds": {
+      "items": {
+        "$ref": "#/$defs/Threshold"
+      },
+      "type": "array",
+      "description": "Pass/fail rules for the whole test, e.g. \"p95 \u003c 500ms\" or\n\"error_rate \u003c 1%\"."
     }
   },
   "additionalProperties": false,

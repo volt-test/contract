@@ -1,0 +1,23 @@
+{
+  "schema_version": "2.0",
+  "name": "Bad threshold",
+  "virtual_users": 1,
+  "scenarios": [
+    {
+      "name": "S",
+      "steps": [
+        {
+          "name": "A",
+          "request": {
+            "method": "GET",
+            "url": "https://example.com/"
+          },
+          "thresholds": [
+            "p95 < 500ms",
+            "p95 < 500"
+          ]
+        }
+      ]
+    }
+  ]
+}

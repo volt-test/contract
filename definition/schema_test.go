@@ -36,12 +36,16 @@ func generateSchema(t *testing.T) []byte {
 			v2 = append(v2, s)
 		}
 	}
+	thresholdType := reflect.TypeOf(definition.Threshold{})
 	r := &jsonschema.Reflector{
 		RequiredFromJSONSchemaTags: true,
 		ExpandedStruct:             true,
 		Mapper: func(t reflect.Type) *jsonschema.Schema {
-			if t == reflect.TypeOf(definition.SchemaVersion{}) {
+			switch t {
+			case reflect.TypeOf(definition.SchemaVersion{}):
 				return &jsonschema.Schema{Type: "string", Enum: v2}
+			case thresholdType:
+				return &jsonschema.Schema{Ref: "#/$defs/Threshold"}
 			}
 			return nil
 		},
@@ -51,6 +55,7 @@ func generateSchema(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	s := r.Reflect(&definition.Definition{})
+	s.Definitions["Threshold"] = thresholdSchema(t, thresholdType)
 	s.ID = schemaID
 	s.Title = "VoltTest test definition"
 
@@ -66,6 +71,7 @@ func generateSchema(t *testing.T) []byte {
 		"Step":         "One HTTP request in a scenario.",
 		"Request":      "An HTTP request. The URL, body and header values may contain ${variable} references.",
 		"Extract":      "A value to capture from the response.",
+		"Threshold":    "A pass/fail rule: an expression such as \"p95 < 500ms\", or an object with the expression and abort settings.",
 	}
 	for name, def := range s.Definitions {
 		desc, ok := typeDescriptions[name]
@@ -98,6 +104,39 @@ func generateSchema(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	return append(b, '\n')
+}
+
+// thresholdSchema describes a threshold: the expression string, or the
+// object form reflected from the Threshold struct (with its field
+// comments).
+func thresholdSchema(t *testing.T, typ reflect.Type) *jsonschema.Schema {
+	t.Helper()
+	r := &jsonschema.Reflector{RequiredFromJSONSchemaTags: true, ExpandedStruct: true}
+	if err := r.AddGoComments("github.com/volt-test/contract/definition", "./"); err != nil {
+		t.Fatal(err)
+	}
+	obj := r.ReflectFromType(typ)
+	obj.Version, obj.ID, obj.Definitions = "", "", nil
+	obj.Description = "The expression with abort settings."
+	// A non-empty delay_abort needs abort_on_fail: true, as in Parse,
+	// which reads an empty one as absent.
+	zero, one := uint64(0), uint64(1)
+	emptyDelay := jsonschema.NewProperties()
+	emptyDelay.Set("delay_abort", &jsonschema.Schema{MaxLength: &zero})
+	needAbort := jsonschema.NewProperties()
+	needAbort.Set("abort_on_fail", &jsonschema.Schema{Const: true})
+	obj.DependentSchemas = map[string]*jsonschema.Schema{
+		"delay_abort": {AnyOf: []*jsonschema.Schema{
+			{Properties: emptyDelay},
+			{Required: []string{"abort_on_fail"}, Properties: needAbort},
+		}},
+	}
+	expr := &jsonschema.Schema{
+		Type:        "string",
+		MinLength:   &one,
+		Description: "The expression alone, e.g. \"p95 < 500ms\".",
+	}
+	return &jsonschema.Schema{OneOf: []*jsonschema.Schema{expr, obj}}
 }
 
 func TestSchemaUpToDate(t *testing.T) {
@@ -155,17 +194,20 @@ func validateAgainstSchema(t testing.TB, s *validator.Schema, data []byte) error
 // Parse rejects them: rules JSON Schema cannot express (or that are not
 // worth expressing). Any other disagreement fails the test.
 var knownSchemaLooser = map[string]string{
-	"type_integer_with_decimal_point.json": "JSON Schema integer accepts 1.0; Parse wants an integer literal",
-	"structure_load_both.json":             "the schema does not forbid virtual_users/duration next to stages",
-	"structure_duplicate_scenario.json":    "names must be unique",
-	"structure_duplicate_step.json":        "names must be unique",
-	"structure_relative_url_no_base.json":  "a path URL needs target.base_url",
-	"structure_bad_url.json":               "URL forms",
-	"structure_bad_base_url.json":          "base_url forms",
-	"structure_bad_duration.json":          "durations are plain strings in the schema",
-	"structure_zero_duration.json":         "durations are plain strings in the schema",
-	"structure_stage_zero_duration.json":   "durations are plain strings in the schema",
-	"structure_whitespace_name.json":       "the schema's \\S is ASCII-only; Parse trims Unicode spaces",
+	"type_integer_with_decimal_point.json":     "JSON Schema integer accepts 1.0; Parse wants an integer literal",
+	"structure_load_both.json":                 "the schema does not forbid virtual_users/duration next to stages",
+	"structure_duplicate_scenario.json":        "names must be unique",
+	"structure_duplicate_step.json":            "names must be unique",
+	"structure_relative_url_no_base.json":      "a path URL needs target.base_url",
+	"structure_bad_url.json":                   "URL forms",
+	"structure_bad_base_url.json":              "base_url forms",
+	"structure_bad_duration.json":              "durations are plain strings in the schema",
+	"structure_zero_duration.json":             "durations are plain strings in the schema",
+	"structure_stage_zero_duration.json":       "durations are plain strings in the schema",
+	"structure_whitespace_name.json":           "the schema's \\S is ASCII-only; Parse trims Unicode spaces",
+	"structure_threshold_bad_expr.json":        "threshold expressions are plain strings in the schema",
+	"structure_threshold_step_iterations.json": "the schema does not know which metrics a step allows",
+	"structure_threshold_negative_delay.json":  "durations are plain strings in the schema",
 }
 
 // TestSchemaAgreesWithParse checks that the schema and Parse agree on
@@ -274,8 +316,38 @@ func TestSchemaShape(t *testing.T) {
 	}
 	defs := s["$defs"].(map[string]any)
 	for name, d := range defs {
-		if d.(map[string]any)["additionalProperties"] != false {
+		def := d.(map[string]any)
+		if name == "Threshold" {
+			continue // a union, checked below
+		}
+		if def["additionalProperties"] != false {
 			t.Errorf("$defs.%s allows additional properties", name)
+		}
+	}
+	// A threshold is a string or a closed object with a required expr.
+	th := defs["Threshold"].(map[string]any)
+	branches, _ := th["oneOf"].([]any)
+	if len(branches) != 2 {
+		t.Fatalf("$defs.Threshold = %v, want a oneOf of two", th)
+	}
+	str, obj := branches[0].(map[string]any), branches[1].(map[string]any)
+	if str["type"] != "string" || obj["type"] != "object" || obj["additionalProperties"] != false ||
+		!contains(obj["required"], "expr") {
+		t.Errorf("$defs.Threshold branches = %v, %v", str, obj)
+	}
+	var keys []string
+	for k := range obj["properties"].(map[string]any) {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	if want := []string{"abort_on_fail", "delay_abort", "expr"}; !reflect.DeepEqual(keys, want) {
+		t.Errorf("threshold object keys = %q, want %q", keys, want)
+	}
+	for _, at := range []map[string]any{props, defs["Scenario"].(map[string]any)["properties"].(map[string]any),
+		defs["Step"].(map[string]any)["properties"].(map[string]any)} {
+		items := at["thresholds"].(map[string]any)["items"].(map[string]any)
+		if items["$ref"] != "#/$defs/Threshold" {
+			t.Errorf("thresholds items = %v", items)
 		}
 	}
 	// No v1-only or dispatch-only key appears anywhere in the schema.

@@ -119,6 +119,7 @@ func validateV2(d *Definition) *ValidationError {
 			}
 		}
 	}
+	collectBounds(d, &ps)
 	return ps.err()
 }
 

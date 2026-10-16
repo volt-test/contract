@@ -1,6 +1,6 @@
 # VoltTest contract
 
-The public VoltTest test-definition format and, soon, the verdict rules
+The public VoltTest test-definition format and the verdict rules
 (thresholds) that decide whether a run passes. Tools that write or read
 VoltTest test definitions can depend on this module. The VoltTest engine
 itself is proprietary and is not part of this repository.
@@ -10,7 +10,7 @@ itself is proprietary and is not part of this repository.
 | Package | Contents |
 |---|---|
 | `definition` | Test-definition types, `Parse`, schema_version checks |
-| `thresholds` | Verdict rules (coming) |
+| `thresholds` | Threshold expressions: parser, metric catalog, scopes (evaluation coming) |
 
 The JSON Schema for v2 definitions is
 [`schema/test-definition.schema.json`](schema/test-definition.schema.json).
@@ -45,10 +45,14 @@ does not mean module v2.
     `duration` each virtual user runs its scenario once; a `duration` that
     is present must be greater than zero, and so must every stage's
     `duration`;
-  - known extractor types, data formats and data modes.
+  - known extractor types, data formats and data modes;
+  - thresholds: every expression parses, each metric is allowed at its
+    scope, and `delay_abort` is a non-negative duration set only with
+    `abort_on_fail: true` (see [Thresholds](#thresholds)).
 - **v1** is read the way the v1 readers (the CLI, the cloud engine and the
   backend) read it. Unknown keys are ignored, keys match case-insensitively,
-  and v2-only keys such as `target.base_url` are dropped unread. Values are
+  and v2-only keys (`target.base_url` and `thresholds` at every level) are
+  dropped unread, whatever their value. Values are
   checked for their JSON type only:
   - **core** fields, which every v1 reader decodes: a value of the wrong
     type fails `Parse`, as it fails every reader;
@@ -106,7 +110,8 @@ It is accepted by `Parse` but is not part of the published schema.
 
 The schema is necessary, not sufficient: every definition `Parse` accepts
 as v2 passes the schema, but `Parse` is stricter. It also checks
-durations, URL forms, unique names and parts of the load model.
+durations, URL forms, unique names, parts of the load model, and threshold
+expressions and their scopes (the schema only requires a non-empty string).
 
 ### Error size
 
@@ -114,6 +119,56 @@ Errors are bounded: at most 1000 paths or problems are kept (the rest are
 counted in `Omitted`), messages list at most 100, and echoed keys and
 values are cut to about 128 bytes. `V1TypeProblems` keeps one problem per
 field and message, with a `Count`.
+
+## Thresholds
+
+A v2 definition can carry `thresholds` on the test, on each scenario and
+on each step: pass/fail rules for the run. Each threshold is either an
+expression string or an object with abort settings:
+
+```json
+"thresholds": [
+  "p95 < 500ms",
+  "error_rate < 1%",
+  {"expr": "p99 < 2s", "abort_on_fail": true, "delay_abort": "30s"}
+]
+```
+
+An expression is `<metric> <operator> <value>`. Spaces around the parts
+are optional (`p99<=1s`); the value has no space before its unit
+(`500ms`). Operators: `<`, `<=`, `>`, `>=`, `==` (no `=` or `!=`). A value
+is digits with an optional fraction, then a unit: no sign, exponent or
+leading dot. Units are case-insensitive; metric names are lowercase.
+
+| Metrics | Kind | Value |
+|---|---|---|
+| `avg` `min` `max` `p50` `p75` `p90` `p95` `p99` `p99.9` (request duration) | duration | `us` (`µs`), `ms`, `s`, `m`; unit required, no `ns` |
+| `ttfb`, `ttfb_<agg>` (time to first byte) | duration | as above |
+| `iteration_duration`, `iteration_duration_<agg>` | duration | as above |
+| `error_rate`, `check_rate` | rate | a percentage: `%` required, at most 100% |
+| `requests`, `failed`, `iterations`, `dropped_iterations` | count | a plain whole number |
+| `rps` | throughput | a plain number (requests per second) |
+| `bytes_sent`, `bytes_received` | size | `b`, `kb` `mb` `gb` (×1000), `kib` `mib` `gib` (×1024), or a plain number of bytes |
+
+`<agg>` is any of the request-duration names (`ttfb_p95`, `ttfb_p99.9`,
+`iteration_duration_max`); plain `ttfb` and `iteration_duration` are the
+average. Only the listed percentiles exist. `==` allows for floating
+point: `|a-b| <= 1e-9 * max(1, |a|, |b|)`, so `dropped_iterations == 0`
+holds only when nothing was dropped.
+
+Scopes: every metric is allowed on the test, a scenario and a step,
+except the iteration metrics (`iteration_duration*`, `iterations`,
+`dropped_iterations`), which are allowed on the test and scenarios only.
+
+`abort_on_fail` and `delay_abort` (a grace period from the start of the
+test, a duration such as `"30s"`; it requires `abort_on_fail: true`) are
+accepted by the format. Whether an engine acts on them depends on the
+engine release; see [Compatibility](#compatibility).
+
+In Go, `thresholds.Parse` reads one expression and `definition.Bounds`
+returns every threshold of a parsed definition with the scenario and step
+it applies to. Values are held in canonical units: microseconds,
+fractions (1% is 0.01) and bytes.
 
 ## Compatibility
 

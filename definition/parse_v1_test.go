@@ -18,6 +18,18 @@ var knownDropped = map[string]bool{
 	"api_key": true,
 }
 
+// v2OnlyDropped reports whether a leaf path lies under a v2-only key,
+// which the v1 path drops unread (v1 readers ignore it).
+func v2OnlyDropped(path string) bool {
+	p := pattern(path)
+	for _, prefix := range []string{"thresholds[]", "scenarios[].thresholds[]", "scenarios[].steps[].thresholds[]", "target.base_url"} {
+		if p == prefix || strings.HasPrefix(p, prefix+".") || strings.HasPrefix(p, prefix+"[") {
+			return true
+		}
+	}
+	return false
+}
+
 // knownRetyped lists leaf paths whose JSON type Marshal(Parse(v1))
 // intentionally changes: schema_version is always written as a string.
 var knownRetyped = map[string]bool{
@@ -60,6 +72,7 @@ func TestV1RoundTrip(t *testing.T) {
 			for _, c := range changesBetween(want, got) {
 				switch {
 				case !c.InAfter && knownDropped[c.Path]:
+				case !c.InAfter && v2OnlyDropped(c.Path):
 				case c.InBefore && c.InAfter && knownRetyped[c.Path]:
 				default:
 					t.Error(c)
