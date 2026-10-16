@@ -1,7 +1,8 @@
 package thresholds_test
 
 import (
-	"encoding/base64"
+	"errors"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -81,11 +82,21 @@ func equalScopes(a, b *thresholds.Scope) bool {
 		if x.Count > 0 && (x.MinUs != y.MinUs || x.MaxUs != y.MaxUs) {
 			return false
 		}
-		if !equalHists(x.Hist, y.Hist) {
+		if !equalHists(canonHist(*x), canonHist(*y)) {
 			return false
 		}
 	}
 	return true
+}
+
+// canonHist is a distribution's histogram by value: with Count 0, an
+// empty histogram is the same as none. With Count > 0 they differ: no
+// histogram means the percentiles are unknown.
+func canonHist(d thresholds.Distribution) *hdrhistogram.Histogram {
+	if d.Hist != nil && d.Count == 0 && d.Hist.TotalCount() == 0 {
+		return nil
+	}
+	return d.Hist
 }
 
 // equalHists treats nil and an empty histogram as different: nil means
@@ -181,50 +192,6 @@ func TestNewHistogram(t *testing.T) {
 	}
 }
 
-func TestHistogramCodec(t *testing.T) {
-	h := dist(t, values(1, 500)...).Hist
-	enc, err := thresholds.EncodeHistogram(h)
-	if err != nil {
-		t.Fatal(err)
-	}
-	back, err := thresholds.DecodeHistogram(enc)
-	if err != nil || !back.Equals(h) {
-		t.Fatalf("round trip: %v", err)
-	}
-	if _, err := thresholds.EncodeHistogram(nil); err == nil {
-		t.Error("nil histogram encoded")
-	}
-
-	other, err := hdrhistogram.New(1, 1_000_000, 2).Encode(hdrhistogram.V2CompressedEncodingCookieBase)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, _ := base64.StdEncoding.DecodeString(string(enc))
-	b64 := func(b []byte) []byte { return []byte(base64.StdEncoding.EncodeToString(b)) }
-	wrongCookie := append([]byte{0, 0, 0, 0}, raw[4:]...)
-	bad := map[string][]byte{
-		"empty":             nil,
-		"not base64":        []byte("%%%"),
-		"seven bytes":       b64([]byte{1, 2, 3, 4, 5, 6, 7}),
-		"eight zero bytes":  b64(make([]byte, 8)),
-		"wrong cookie":      b64(wrongCookie),
-		"truncated":         b64(raw[:len(raw)/2]),
-		"corrupt payload":   b64(append(append([]byte{}, raw[:8]...), make([]byte, len(raw)-8)...)),
-		"other config":      other,
-		"length beyond end": b64(append(append([]byte{}, raw[:4]...), 0x7f, 0xff, 0xff, 0xff)),
-	}
-	for name, data := range bad {
-		h, err := thresholds.DecodeHistogram(data)
-		if err == nil || h != nil {
-			t.Errorf("%s: DecodeHistogram = %v, %v", name, h, err)
-			continue
-		}
-		if !strings.HasPrefix(err.Error(), "thresholds: decode histogram: ") {
-			t.Errorf("%s: error %q", name, err)
-		}
-	}
-}
-
 func TestScopeAdd(t *testing.T) {
 	a := thresholds.Scope{Requests: 10, Failed: 1, BytesSent: 100, BytesReceived: 1000,
 		Checks: ptr(4), ChecksPassed: ptr(3), Iterations: ptr(2), DroppedIterations: nil,
@@ -299,12 +266,25 @@ func TestScopeAddErrors(t *testing.T) {
 		"other highest value":       {TTFB: thresholds.Distribution{Hist: hdrhistogram.New(1, 1_000_000, 3)}},
 		"other lowest value":        {IterationDuration: thresholds.Distribution{Hist: hdrhistogram.New(1000, 3_600_000_000, 3)}},
 		"sum overflow in a summary": {Duration: thresholds.Distribution{Count: 1, SumUs: 1<<63 - 1, MinUs: 1, MaxUs: 1}},
+		"more failed than requests": {Requests: 1, Failed: 2},
+		"more passed than checks":   {Checks: ptr(1), ChecksPassed: ptr(2)},
+		"negative sum":              {TTFB: thresholds.Distribution{SumUs: -1}},
+		"negative min":              {TTFB: thresholds.Distribution{Count: 1, MinUs: -1, MaxUs: 1}},
+	}
+	want := func(name string) error {
+		switch {
+		case strings.HasPrefix(name, "other"):
+			return thresholds.ErrHistogramConfig
+		case strings.Contains(name, "overflow"):
+			return thresholds.ErrOverflow
+		}
+		return thresholds.ErrInvalidScope
 	}
 	for name, o := range cases {
 		s := good()
 		before := s.Clone()
-		if err := s.Add(o); err == nil {
-			t.Errorf("%s: Add succeeded", name)
+		if err := s.Add(o); !errors.Is(err, want(name)) {
+			t.Errorf("%s: Add = %v, want %v", name, err, want(name))
 		}
 		if !equalScopes(s, before) {
 			t.Errorf("%s: Add changed s on error", name)
@@ -423,11 +403,41 @@ func TestMergeErrors(t *testing.T) {
 		"histogram config, first":   {mismatch, ok},
 		"histogram config, in step": {ok, stepMismatch},
 		"negative counter":          {ok, node(t, 0, time.Second, thresholds.Scope{Failed: -1}, nil)},
+		"end before start":          {ok, node(t, time.Second, 0, thresholds.Scope{}, nil)},
+		"failed above requests":     {ok, node(t, 0, time.Second, thresholds.Scope{Requests: 1, Failed: 2}, nil)},
+		"overflow":                  {ok, node(t, 0, time.Second, thresholds.Scope{Requests: 1<<63 - 1}, nil)},
+	}
+	want := map[string]error{
+		"zero start": thresholds.ErrInvalidScope, "zero end": thresholds.ErrInvalidScope,
+		"histogram config": thresholds.ErrHistogramConfig, "histogram config, first": thresholds.ErrHistogramConfig,
+		"histogram config, in step": thresholds.ErrHistogramConfig, "negative counter": thresholds.ErrInvalidScope,
+		"end before start": thresholds.ErrInvalidScope, "failed above requests": thresholds.ErrInvalidScope,
+		"overflow": thresholds.ErrOverflow,
 	}
 	for name, nodes := range cases {
-		if m, err := thresholds.Merge(nodes...); err == nil || m != nil {
+		m, err := thresholds.Merge(nodes...)
+		if err == nil || m != nil {
 			t.Errorf("%s: Merge = %v, %v", name, m, err)
+			continue
 		}
+		if w := want[name]; w != nil && !errors.Is(err, w) {
+			t.Errorf("%s: error %v, want %v", name, err, w)
+		}
+		if !strings.HasPrefix(err.Error(), "thresholds: ") || strings.Count(err.Error(), "thresholds: ") != 1 {
+			t.Errorf("%s: error text %q", name, err)
+		}
+	}
+	// An End equal to the Start is allowed: rps over it is no_data.
+	if _, err := thresholds.Merge(node(t, time.Second, time.Second, thresholds.Scope{}, nil)); err != nil {
+		t.Errorf("empty window: %v", err)
+	}
+	// Long scenario and step names are cut in the error.
+	long := strings.Repeat("x", 5000)
+	_, err := thresholds.Merge(ok, node(t, 0, time.Second, thresholds.Scope{}, map[string]*thresholds.ScenarioScope{
+		long: {Steps: map[string]*thresholds.Scope{long: {Failed: 1}}},
+	}))
+	if !errors.Is(err, thresholds.ErrInvalidScope) || len(err.Error()) > 400 {
+		t.Errorf("long names: %d bytes: %v", len(fmt.Sprint(err)), err)
 	}
 }
 
@@ -518,7 +528,8 @@ func (r *reader) byte() byte {
 }
 
 func (r *reader) scope(t *testing.T) thresholds.Scope {
-	s := thresholds.Scope{Requests: int64(r.byte()), Failed: int64(r.byte() % 8), BytesSent: int64(r.byte()) << 10}
+	s := thresholds.Scope{Requests: int64(r.byte()), BytesSent: int64(r.byte()) << 10}
+	s.Failed = min(int64(r.byte()%8), s.Requests)
 	opt := func() *int64 {
 		if c := r.byte(); c%3 != 0 {
 			return ptr(int64(c))
@@ -526,6 +537,9 @@ func (r *reader) scope(t *testing.T) thresholds.Scope {
 		return nil
 	}
 	s.Checks, s.ChecksPassed, s.Iterations, s.DroppedIterations = opt(), opt(), opt(), opt()
+	if s.Checks != nil && s.ChecksPassed != nil && *s.ChecksPassed > *s.Checks {
+		s.ChecksPassed = ptr(*s.Checks)
+	}
 	switch mode := r.byte() % 8; mode {
 	case 1, 2:
 		n := int(r.byte() % 6)

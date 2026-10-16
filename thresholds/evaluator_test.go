@@ -100,7 +100,8 @@ func TestDroppedIterationsZero(t *testing.T) {
 }
 
 // Missing data is no_data, never a 0ms pass, and fails the final verdict
-// without counting as a breach.
+// without counting as a breach. A scope the snapshot does not have is
+// no_data for every metric.
 func TestNoData(t *testing.T) {
 	s := &thresholds.Snapshot{Start: t0, End: t0.Add(time.Second),
 		Test: thresholds.Scope{
@@ -130,7 +131,16 @@ func TestNoData(t *testing.T) {
 		{thresholds.Ref{Scenario: "s", Step: "absent"}, "p99 < 1s", thresholds.StatusNoData},
 		{thresholds.Ref{Scenario: "missing"}, "p99 < 1s", thresholds.StatusNoData},
 		{thresholds.Ref{Scenario: "missing", Step: "x"}, "error_rate < 1%", thresholds.StatusNoData},
-		{thresholds.Ref{Scenario: "missing", Step: "x"}, "failed == 0", thresholds.StatusPassed},
+		// A scope the snapshot does not have is no_data for every kind:
+		// counts, sizes and rps included, not a passing zero.
+		{thresholds.Ref{Scenario: "missing", Step: "x"}, "failed == 0", thresholds.StatusNoData},
+		{thresholds.Ref{Scenario: "missing"}, "requests > 10", thresholds.StatusNoData},
+		{thresholds.Ref{Scenario: "missing"}, "rps > 1", thresholds.StatusNoData},
+		{thresholds.Ref{Scenario: "s", Step: "absent"}, "bytes_sent < 1kb", thresholds.StatusNoData},
+		{thresholds.Ref{Scenario: "s", Step: "absent"}, "dropped_iterations == 0", thresholds.StatusNoData},
+		// A present scope with nothing in it is a measured zero.
+		{thresholds.Ref{}, "failed == 0", thresholds.StatusPassed},
+		{thresholds.Ref{}, "requests > 10", thresholds.StatusFailed},
 	}
 	var rs []thresholds.Result
 	for _, tc := range cases {
@@ -146,8 +156,44 @@ func TestNoData(t *testing.T) {
 	if thresholds.AllPassed(rs) {
 		t.Error("AllPassed with no_data results")
 	}
-	if b := thresholds.Breached(rs); len(b) != 0 {
-		t.Errorf("Breached reports no_data: %+v", b)
+	if b := thresholds.Breached(rs); len(b) != 1 || b[0].Expr != "requests > 10" || b[0].Scope != thresholds.ScopeTest {
+		t.Errorf("Breached = %+v, want only the measured test-scope failure", b)
+	}
+
+	// A nil snapshot fails closed: everything is no_data, nothing passes
+	// and nothing is breached.
+	var bounds []thresholds.Bound
+	for _, c := range []struct {
+		ref  thresholds.Ref
+		expr string
+	}{
+		{thresholds.Ref{}, "failed == 0"},
+		{thresholds.Ref{}, "bytes_sent < 1kb"},
+		{thresholds.Ref{Scenario: "s"}, "requests > 10"},
+		{thresholds.Ref{Scenario: "s", Step: "a"}, "rps > 1"},
+		{thresholds.Ref{}, "error_rate < 1%"},
+		{thresholds.Ref{}, "p95 < 1s"},
+	} {
+		th, err := thresholds.Parse(c.expr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bounds = append(bounds, thresholds.Bound{Ref: c.ref, Threshold: th})
+	}
+	nilResults := thresholds.Evaluate(nil, bounds)
+	for _, r := range nilResults {
+		if r.Status != thresholds.StatusNoData || r.Actual != nil || r.Passed {
+			t.Errorf("nil snapshot, %s: %+v", r.Expr, r)
+		}
+	}
+	if thresholds.AllPassed(nilResults) || len(thresholds.Breached(nilResults)) != 0 {
+		t.Error("nil snapshot: AllPassed or Breached")
+	}
+	// The same bounds on a snapshot without those scenarios: the test
+	// scope is measured, the missing scopes are no_data and not breached.
+	empty := thresholds.Evaluate(&thresholds.Snapshot{Start: t0, End: t0.Add(time.Second)}, bounds)
+	if b := thresholds.Breached(empty); len(b) != 0 {
+		t.Errorf("never-run scopes breached: %+v", b)
 	}
 
 	// rps needs a window.
@@ -157,14 +203,19 @@ func TestNoData(t *testing.T) {
 			t.Errorf("rps over %v..%v: %+v", w[0], w[1], r)
 		}
 	}
-	// A nil snapshot is empty.
-	if r := evaluate(t, nil, thresholds.Ref{}, "p95 < 1s"); r.Status != thresholds.StatusNoData {
-		t.Errorf("nil snapshot: %+v", r)
-	}
-	// A threshold not built by Parse has no data.
-	r := thresholds.Evaluate(&thresholds.Snapshot{}, []thresholds.Bound{{Threshold: thresholds.Threshold{Metric: thresholds.Metric{Name: "requests", Kind: thresholds.KindCount}, Op: thresholds.OpGE}}})[0]
-	if r.Status != thresholds.StatusNoData {
-		t.Errorf("hand-built threshold: %+v", r)
+	// An invalid threshold has no data, and is never breached.
+	req, _ := thresholds.Parse("requests >= 1")
+	for name, th := range map[string]thresholds.Threshold{
+		"hand-built metric": {Metric: thresholds.Metric{Name: "requests", Kind: thresholds.KindCount}, Op: thresholds.OpGE},
+		"unknown op":        {Metric: req.Metric, Op: thresholds.Op(42), Value: 1},
+		"NaN":               {Metric: req.Metric, Op: thresholds.OpGE, Value: math.NaN()},
+		"negative":          {Metric: req.Metric, Op: thresholds.OpGE, Value: -1},
+		"fraction count":    {Metric: req.Metric, Op: thresholds.OpGE, Value: 0.5},
+	} {
+		r := thresholds.Evaluate(&thresholds.Snapshot{Test: thresholds.Scope{Requests: 0}}, []thresholds.Bound{{Threshold: th}})
+		if r[0].Status != thresholds.StatusNoData || len(thresholds.Breached(r)) != 0 {
+			t.Errorf("%s: %+v", name, r[0])
+		}
 	}
 }
 
@@ -426,5 +477,27 @@ func TestEvaluateIsPure(t *testing.T) {
 	}
 	if s.Scenarios != nil {
 		t.Error("Evaluate created scopes")
+	}
+}
+
+// The example in the package documentation: a percentile reads the top of
+// its HDR bucket, so values of exactly 500ms give a p95 of 500.223ms.
+func TestPercentileReadsBucketTop(t *testing.T) {
+	d := dist(t, 500_000, 500_000, 500_000)
+	s := &thresholds.Snapshot{Start: t0, End: t0.Add(time.Second), Test: thresholds.Scope{Requests: 3, Duration: d}}
+	want := map[string]thresholds.Status{
+		"p95 == 500ms": thresholds.StatusFailed,
+		"p95 <= 500ms": thresholds.StatusFailed,
+		"p95 < 501ms":  thresholds.StatusPassed,
+		"max == 500ms": thresholds.StatusPassed, // exact
+	}
+	for expr, status := range want {
+		r := evaluate(t, s, thresholds.Ref{}, expr)
+		if r.Status != status {
+			t.Errorf("%s: %s (actual %v), want %s", expr, r.Status, deref(r.Actual), status)
+		}
+	}
+	if got := actual(t, evaluate(t, s, thresholds.Ref{}, "p95 < 1s")); got != 500.223 {
+		t.Errorf("p95 = %vms, want 500.223ms", got)
 	}
 }

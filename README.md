@@ -200,15 +200,21 @@ threshold:
   rates, `bytes` for sizes, `req/s` for `rps`, and `""` for counts.
 - `status` is `passed`, `failed` or `no_data`. `no_data` (with a null
   `actual`) means there was nothing to measure: no requests for a rate, no
-  values for a duration, a counter the engine did not measure, or a
-  scenario or step that never ran. The run passes only if every threshold
-  passed, so `no_data` fails the final verdict; but it never aborts a
-  running test.
+  values for a duration, or a counter the engine did not measure. A
+  scenario or step missing from the results is `no_data` for every
+  metric, counts included, so engines report every scope of the
+  definition, with zeros when nothing happened. The run passes only if
+  every threshold passed, so `no_data` fails the final verdict; but it
+  never aborts a running test.
 - Percentiles come from the scope's HDR histogram (microseconds, 1µs to
   1h, 3 significant figures). Rates, averages and `rps` are computed from
   the scope's own counters over the run's wall-clock window, so a run
   merged from several nodes gets the run's numbers, not averages of the
-  nodes' numbers.
+  nodes' numbers. `rps` uses that whole window at every scope, so a
+  scenario that ran for part of the test shows a diluted rate.
+- A percentile reads the top of its HDR bucket, up to 0.1% above the
+  recorded values (500ms exactly reads as 500.223ms), so compare
+  latencies with `<` or `<=` and some headroom, not `==`.
 
 In Go, `definition.ThresholdConfig` holds a threshold as written,
 `thresholds.Parse` reads one expression, and `definition.Bounds` returns

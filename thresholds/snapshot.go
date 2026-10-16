@@ -3,72 +3,11 @@ package thresholds
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	hdrhistogram "github.com/HdrHistogram/hdrhistogram-go"
 )
-
-// The histogram configuration every snapshot uses: values in microseconds
-// from 1µs to one hour, with 3 significant figures. Producers create
-// histograms with NewHistogram. Merge and Scope.Add reject a histogram
-// with any other configuration, and Evaluate treats one as missing.
-const (
-	HistogramLowestUs  int64 = 1
-	HistogramHighestUs int64 = 3_600_000_000
-	HistogramSigFigs         = 3
-)
-
-// NewHistogram returns an empty histogram with the snapshot configuration.
-// One takes about 188 KB.
-func NewHistogram() *hdrhistogram.Histogram {
-	return hdrhistogram.New(HistogramLowestUs, HistogramHighestUs, HistogramSigFigs)
-}
-
-// standardHistogram reports whether h has the snapshot configuration.
-func standardHistogram(h *hdrhistogram.Histogram) bool {
-	return h.LowestTrackableValue() == HistogramLowestUs &&
-		h.HighestTrackableValue() == HistogramHighestUs &&
-		h.SignificantFigures() == HistogramSigFigs
-}
-
-var errHistogramConfig = fmt.Errorf("histogram configuration must be %d..%dus with %d significant figures",
-	HistogramLowestUs, HistogramHighestUs, HistogramSigFigs)
-
-// EncodeHistogram returns h in the base64 V2 compressed HDR encoding, the
-// form in which node results carry histograms.
-func EncodeHistogram(h *hdrhistogram.Histogram) ([]byte, error) {
-	if h == nil {
-		return nil, errors.New("thresholds: nil histogram")
-	}
-	b, err := h.Encode(hdrhistogram.V2CompressedEncodingCookieBase)
-	if err != nil {
-		return nil, fmt.Errorf("thresholds: encode histogram: %w", err)
-	}
-	return b, nil
-}
-
-// DecodeHistogram reads a histogram in the base64 V2 compressed HDR
-// encoding. Unlike hdrhistogram.Decode it never panics on malformed input,
-// and it rejects a histogram whose configuration is not the snapshot
-// configuration, so it is safe on bytes received from another process.
-func DecodeHistogram(data []byte) (h *hdrhistogram.Histogram, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			h, err = nil, errors.New("thresholds: decode histogram: malformed data")
-		}
-	}()
-	h, err = hdrhistogram.Decode(data)
-	if err != nil {
-		return nil, fmt.Errorf("thresholds: decode histogram: %w", err)
-	}
-	if !standardHistogram(h) {
-		return nil, errors.New("thresholds: decode histogram: " + errHistogramConfig.Error())
-	}
-	if h.TotalCount() < 0 {
-		return nil, errors.New("thresholds: decode histogram: count overflow")
-	}
-	return h, nil
-}
 
 // Distribution summarises a set of durations, in microseconds. Count,
 // SumUs, MinUs and MaxUs are exact and cover every value; Hist holds the
@@ -133,7 +72,7 @@ func (s *Scope) Add(o *Scope) error {
 	add := func(a, b int64) int64 {
 		v, ok := addInt(a, b)
 		if !ok && err == nil {
-			err = errors.New("thresholds: counter overflow")
+			err = ErrOverflow
 		}
 		return v
 	}
@@ -186,29 +125,39 @@ func addDistribution(a, b Distribution, add func(a, b int64) int64) Distribution
 	return r
 }
 
+// histOf returns d's histogram, or nil when it has none or it adds
+// nothing: a distribution with Count 0 and an empty histogram is the same
+// as one without a histogram.
+func histOf(d Distribution) *hdrhistogram.Histogram {
+	if d.Hist == nil || (d.Count == 0 && d.Hist.TotalCount() == 0) {
+		return nil
+	}
+	return d.Hist
+}
+
 // mergeHist returns the histogram of a and b combined. A side with values
 // but no histogram makes the result nil (the percentiles are unknown).
-// Otherwise the result is nil only when neither side has a histogram, and
-// a known histogram, possibly empty, when either has one: a.Hist with b's
-// values merged in, or a new histogram when a has none. The rule is
-// symmetric, so the order of the nodes does not matter.
+// Otherwise the result is nil when neither side has a histogram (see
+// histOf), and a known histogram, possibly empty, when either has one:
+// a.Hist with b's values merged in, or a new histogram when a has none.
+// The rule is symmetric, so the order of the nodes does not matter.
 func mergeHist(a, b Distribution) *hdrhistogram.Histogram {
 	if (a.Count > 0 && a.Hist == nil) || (b.Count > 0 && b.Hist == nil) {
 		return nil
 	}
-	if a.Hist == nil && b.Hist == nil {
+	hb := histOf(b)
+	if histOf(a) == nil && hb == nil {
 		return nil
 	}
 	h := a.Hist
 	if h == nil {
 		h = NewHistogram()
 	}
-	if b.Hist != nil && b.Hist.TotalCount() > 0 {
-		from := b.Hist
-		if from == h {
-			from = cloneHist(from) // Merge cannot read and write the same histogram
+	if hb != nil && hb.TotalCount() > 0 {
+		if hb == h {
+			hb = cloneHist(hb) // Merge cannot read and write the same histogram
 		}
-		h.Merge(from) // same configuration, so nothing is dropped
+		h.Merge(hb) // same configuration, so nothing is dropped
 	}
 	return h
 }
@@ -222,32 +171,40 @@ func cloneHist(h *hdrhistogram.Histogram) *hdrhistogram.Histogram {
 	return c
 }
 
-// check rejects negative counters and histograms with another
-// configuration.
+// check rejects negative counters, broken invariants and histograms with
+// another configuration.
 func (s *Scope) check() error {
 	for _, v := range []int64{s.Requests, s.Failed, s.BytesSent, s.BytesReceived} {
 		if v < 0 {
-			return errors.New("thresholds: negative counter")
+			return fmt.Errorf("%w: negative counter", ErrInvalidScope)
 		}
 	}
 	for _, p := range []*int64{s.Checks, s.ChecksPassed, s.Iterations, s.DroppedIterations} {
 		if p != nil && *p < 0 {
-			return errors.New("thresholds: negative counter")
+			return fmt.Errorf("%w: negative counter", ErrInvalidScope)
 		}
+	}
+	if s.Failed > s.Requests {
+		return fmt.Errorf("%w: more failed requests than requests", ErrInvalidScope)
+	}
+	if s.Checks != nil && s.ChecksPassed != nil && *s.ChecksPassed > *s.Checks {
+		return fmt.Errorf("%w: more passed checks than checks", ErrInvalidScope)
 	}
 	for _, d := range []*Distribution{&s.Duration, &s.TTFB, &s.IterationDuration} {
 		if d.Count < 0 || d.SumUs < 0 || (d.Count > 0 && (d.MinUs < 0 || d.MaxUs < d.MinUs)) {
-			return errors.New("thresholds: invalid distribution")
+			return fmt.Errorf("%w: invalid distribution", ErrInvalidScope)
 		}
 		if d.Hist != nil && !standardHistogram(d.Hist) {
-			return errors.New("thresholds: " + errHistogramConfig.Error())
+			return ErrHistogramConfig
 		}
 	}
 	return nil
 }
 
 // Clone returns a deep copy of s: optional counters and histograms are
-// copied, not shared.
+// copied, not shared. A distribution with Count 0 and an empty histogram
+// is cloned without one (see the package documentation), so Clone
+// allocates a histogram only when there is something to copy.
 func (s *Scope) Clone() *Scope {
 	c := *s
 	cp := func(p *int64) *int64 {
@@ -259,9 +216,9 @@ func (s *Scope) Clone() *Scope {
 	}
 	c.Checks, c.ChecksPassed = cp(s.Checks), cp(s.ChecksPassed)
 	c.Iterations, c.DroppedIterations = cp(s.Iterations), cp(s.DroppedIterations)
-	c.Duration.Hist = cloneHist(s.Duration.Hist)
-	c.TTFB.Hist = cloneHist(s.TTFB.Hist)
-	c.IterationDuration.Hist = cloneHist(s.IterationDuration.Hist)
+	c.Duration.Hist = cloneHist(histOf(s.Duration))
+	c.TTFB.Hist = cloneHist(histOf(s.TTFB))
+	c.IterationDuration.Hist = cloneHist(histOf(s.IterationDuration))
 	return &c
 }
 
@@ -272,8 +229,10 @@ func (s *Scope) Clone() *Scope {
 // latest end, so rps over the merged snapshot is the run's wall-clock
 // throughput, not the sum of the nodes' rates.
 //
-// Merge returns an error for no snapshots, a nil snapshot, a zero Start or
-// End, a negative counter, or a histogram that does not have the snapshot
+// Merge returns an error for no snapshots or a nil snapshot. It returns
+// an error wrapping ErrInvalidScope for a zero Start or End, an End before
+// the Start, a negative counter or a broken invariant; ErrOverflow for an
+// overflow; and ErrHistogramConfig for a histogram without the snapshot
 // configuration. Merge allocates a histogram (about 188 KB) for every
 // distribution that has values.
 func Merge(nodes ...*Snapshot) (*Snapshot, error) {
@@ -286,7 +245,10 @@ func Merge(nodes ...*Snapshot) (*Snapshot, error) {
 			return nil, fmt.Errorf("thresholds: merge: snapshot %d is nil", i)
 		}
 		if n.Start.IsZero() || n.End.IsZero() {
-			return nil, fmt.Errorf("thresholds: merge: snapshot %d has no start or end time", i)
+			return nil, fmt.Errorf("%w: snapshot %d has no start or end time", ErrInvalidScope, i)
+		}
+		if n.End.Before(n.Start) {
+			return nil, fmt.Errorf("%w: snapshot %d ends before it starts", ErrInvalidScope, i)
 		}
 		if i == 0 || n.Start.Before(out.Start) {
 			out.Start = n.Start
@@ -295,7 +257,7 @@ func Merge(nodes ...*Snapshot) (*Snapshot, error) {
 			out.End = n.End
 		}
 		if err := addInto(&out.Test, &n.Test, i == 0); err != nil {
-			return nil, fmt.Errorf("thresholds: merge: snapshot %d: %w", i, err)
+			return nil, inMerge(err, fmt.Sprintf("snapshot %d, test", i))
 		}
 		for name, sc := range n.Scenarios {
 			if sc == nil {
@@ -310,7 +272,7 @@ func Merge(nodes ...*Snapshot) (*Snapshot, error) {
 				out.Scenarios[name] = dst
 			}
 			if err := addInto(&dst.Scope, &sc.Scope, !seen); err != nil {
-				return nil, fmt.Errorf("thresholds: merge: snapshot %d, scenario %q: %w", i, name, err)
+				return nil, inMerge(err, fmt.Sprintf("snapshot %d, scenario %s", i, quoteShort(name)))
 			}
 			for step, st := range sc.Steps {
 				if st == nil {
@@ -325,12 +287,26 @@ func Merge(nodes ...*Snapshot) (*Snapshot, error) {
 					dst.Steps[step] = d
 				}
 				if err := addInto(d, st, !seen); err != nil {
-					return nil, fmt.Errorf("thresholds: merge: snapshot %d, scenario %q, step %q: %w", i, name, step, err)
+					return nil, inMerge(err, fmt.Sprintf("snapshot %d, scenario %s, step %s", i, quoteShort(name), quoteShort(step)))
 				}
 			}
 		}
 	}
 	return out, nil
+}
+
+// mergeError adds where a merge failed to an error, keeping the error
+// matchable with errors.Is.
+type mergeError struct {
+	msg string
+	err error
+}
+
+func (e *mergeError) Error() string { return e.msg }
+func (e *mergeError) Unwrap() error { return e.err }
+
+func inMerge(err error, where string) error {
+	return &mergeError{msg: "thresholds: merge: " + where + ": " + strings.TrimPrefix(err.Error(), "thresholds: "), err: err}
 }
 
 // addInto adds src to dst, or makes dst a copy of src when first is set.

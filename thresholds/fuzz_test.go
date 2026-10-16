@@ -38,6 +38,9 @@ func FuzzParse(f *testing.F) {
 			return
 		}
 		requireRoundTrip(t, th)
+		if err := th.Valid(); err != nil {
+			t.Fatalf("Parse(%q) is not Valid: %v", expr, err)
+		}
 		for _, k := range []thresholds.ScopeKind{thresholds.ScopeTest, thresholds.ScopeScenario} {
 			if err := th.ValidFor(k); err != nil {
 				t.Fatalf("%q not valid for %s: %v", expr, k, err)

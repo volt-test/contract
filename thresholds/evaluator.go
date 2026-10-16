@@ -63,19 +63,21 @@ func unitOf(k Kind) string {
 
 // Evaluate checks each bound against the snapshot at its scope and returns
 // one Result per bound, in order. It is a pure function of its inputs and
-// does not modify them. A nil snapshot, or a scope the snapshot does not
-// have (a scenario or step that never ran), is evaluated as empty. A
-// bound whose threshold was not built by Parse gives no_data.
+// does not modify them, but it reads the snapshot's histograms, so the
+// caller must not record into them or Add to the snapshot's scopes at the
+// same time.
+//
+// It fails closed: with a nil snapshot every result is no_data, and so is
+// every result for a scope the snapshot does not have, whatever the
+// metric. Producers therefore emit every scope of the definition, with
+// zeros when nothing happened; a present scope with no requests is a
+// measured zero. A threshold that is not Valid gives no_data.
 //
 // Values are compared in the canonical units of Threshold.Value
 // (microseconds, fractions, bytes) and converted for display only.
 func Evaluate(s *Snapshot, bounds []Bound) []Result {
-	if s == nil {
-		s = &Snapshot{}
-	}
 	out := make([]Result, len(bounds))
 	actuals := make([]float64, len(bounds))
-	var empty Scope
 	for i, b := range bounds {
 		th := b.Threshold
 		r := Result{
@@ -89,11 +91,7 @@ func Evaluate(s *Snapshot, bounds []Bound) []Result {
 		if r.Expr == "" {
 			r.Expr = th.String()
 		}
-		sc := s.scope(b.Ref)
-		if sc == nil {
-			sc = &empty
-		}
-		if c, ok := lookupMetric(th.Metric.Name); ok && c == th.Metric {
+		if sc := s.scope(b.Ref); sc != nil && th.Valid() == nil {
 			if v, display, ok := measure(s, sc, th.Metric); ok {
 				actuals[i] = display
 				r.Actual = &actuals[i]
@@ -109,8 +107,12 @@ func Evaluate(s *Snapshot, bounds []Bound) []Result {
 	return out
 }
 
-// scope finds the scope a Ref names, or nil.
+// scope finds the scope a Ref names, or nil when s is nil or has no such
+// scope.
 func (s *Snapshot) scope(r Ref) *Scope {
+	if s == nil {
+		return nil
+	}
 	switch r.Scope() {
 	case ScopeTest:
 		return &s.Test
