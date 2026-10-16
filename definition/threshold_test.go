@@ -14,26 +14,26 @@ import (
 func TestThresholdJSON(t *testing.T) {
 	decode := []struct {
 		in   string
-		want definition.Threshold
+		want definition.ThresholdConfig
 		err  bool
 	}{
-		{`"p95 < 500ms"`, definition.Threshold{Expr: "p95 < 500ms"}, false},
-		{`{"expr": "p95 < 1s"}`, definition.Threshold{Expr: "p95 < 1s"}, false},
-		{`{"expr": "p95 < 1s", "abort_on_fail": true, "delay_abort": "5s"}`, definition.Threshold{Expr: "p95 < 1s", AbortOnFail: true, DelayAbort: "5s"}, false},
-		{`null`, definition.Threshold{Expr: "unchanged"}, false},
-		{`5`, definition.Threshold{Expr: "unchanged"}, true},
-		{`[]`, definition.Threshold{Expr: "unchanged"}, true},
-		{`true`, definition.Threshold{Expr: "unchanged"}, true},
+		{`"p95 < 500ms"`, definition.ThresholdConfig{Expr: "p95 < 500ms"}, false},
+		{`{"expr": "p95 < 1s"}`, definition.ThresholdConfig{Expr: "p95 < 1s"}, false},
+		{`{"expr": "p95 < 1s", "abort_on_fail": true, "delay_abort": "5s"}`, definition.ThresholdConfig{Expr: "p95 < 1s", AbortOnFail: true, DelayAbort: "5s"}, false},
+		{`null`, definition.ThresholdConfig{Expr: "unchanged"}, false},
+		{`5`, definition.ThresholdConfig{Expr: "unchanged"}, true},
+		{`[]`, definition.ThresholdConfig{Expr: "unchanged"}, true},
+		{`true`, definition.ThresholdConfig{Expr: "unchanged"}, true},
 	}
 	for _, tc := range decode {
-		got := definition.Threshold{Expr: "unchanged"}
+		got := definition.ThresholdConfig{Expr: "unchanged"}
 		err := json.Unmarshal([]byte(tc.in), &got)
 		if (err != nil) != tc.err || got != tc.want {
 			t.Errorf("Unmarshal(%s) = %+v, %v; want %+v, error %v", tc.in, got, err, tc.want, tc.err)
 		}
 	}
 
-	encode := map[definition.Threshold]string{
+	encode := map[definition.ThresholdConfig]string{
 		{Expr: "p95 < 500ms"}:                            `"p95 < 500ms"`,
 		{Expr: "p95 < 1s", AbortOnFail: true}:            `{"expr":"p95 < 1s","abort_on_fail":true}`,
 		{Expr: "p95 < 1s", DelayAbort: "5s"}:             `{"expr":"p95 < 1s","delay_abort":"5s"}`,
@@ -47,13 +47,13 @@ func TestThresholdJSON(t *testing.T) {
 		if err != nil || string(b) != want {
 			t.Errorf("MarshalJSON(%+v) = %s, %v; want %s", th, b, err, want)
 		}
-		var back definition.Threshold
+		var back definition.ThresholdConfig
 		if err := json.Unmarshal(b, &back); err != nil || back != th {
 			t.Errorf("round trip of %+v = %+v, %v", th, back, err)
 		}
 	}
 	// Inside a document, encoding/json applies its usual escaping.
-	b, err := json.Marshal([]definition.Threshold{{Expr: "p95 < 1s"}})
+	b, err := json.Marshal([]definition.ThresholdConfig{{Expr: "p95 < 1s"}})
 	if want := `["p95 ` + `\` + `u003c 1s"]`; err != nil || string(b) != want {
 		t.Errorf("json.Marshal = %s, %v", b, err)
 	}
@@ -130,10 +130,10 @@ func TestBoundsNone(t *testing.T) {
 // from JSON.
 func TestBoundsChecksBuiltDefinitions(t *testing.T) {
 	d := &definition.Definition{
-		Thresholds: []definition.Threshold{{Expr: "p95 < 1s"}, {Expr: "p95 = 1s"}},
+		Thresholds: []definition.ThresholdConfig{{Expr: "p95 < 1s"}, {Expr: "p95 = 1s"}, {Expr: "p95 = 1s", AbortOnFail: true}, {AbortOnFail: true}},
 		Scenarios: []definition.Scenario{{
 			Name:  "s",
-			Steps: []definition.Step{{Name: "a", Thresholds: []definition.Threshold{{Expr: "iterations > 1"}, {Expr: "p95 < 1s", DelayAbort: "1s"}}}},
+			Steps: []definition.Step{{Name: "a", Thresholds: []definition.ThresholdConfig{{Expr: "iterations > 1"}, {Expr: "p95 < 1s", DelayAbort: "1s"}}}},
 		}},
 	}
 	_, err := definition.Bounds(d)
@@ -145,9 +145,55 @@ func TestBoundsChecksBuiltDefinitions(t *testing.T) {
 	for _, p := range ve.Problems {
 		got = append(got, p.Path)
 	}
-	want := []string{"thresholds[1]", "scenarios[0].steps[0].thresholds[0]", "scenarios[0].steps[0].thresholds[1].delay_abort"}
+	want := []string{"thresholds[1]", "thresholds[2].expr", "thresholds[3].expr", "scenarios[0].steps[0].thresholds[0]",
+		"scenarios[0].steps[0].thresholds[1].delay_abort"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("problem paths = %q, want %q", got, want)
+	}
+}
+
+// Bounds never returns a Ref whose Scope differs from where its threshold
+// sits: a scenario or step that carries thresholds needs a name.
+func TestBoundsRequiresNames(t *testing.T) {
+	step := func(name string, th ...string) definition.Step {
+		s := definition.Step{Name: name}
+		for _, e := range th {
+			s.Thresholds = append(s.Thresholds, definition.ThresholdConfig{Expr: e})
+		}
+		return s
+	}
+	d := &definition.Definition{Scenarios: []definition.Scenario{
+		{Name: "", Thresholds: []definition.ThresholdConfig{{Expr: "p95 < 1s"}}, Steps: []definition.Step{step("a")}},
+		{Name: " ", Steps: []definition.Step{step("a", "p95 < 1s")}},
+		{Name: "named", Steps: []definition.Step{step("", "p95 < 1s"), step("\t"), step("ok", "p95 < 1s")}},
+		{Name: "", Steps: []definition.Step{step("")}}, // no thresholds: not Bounds' concern
+	}}
+	_, err := definition.Bounds(d)
+	var ve *definition.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("error = %v", err)
+	}
+	var got []string
+	for _, p := range ve.Problems {
+		got = append(got, p.String())
+	}
+	want := []string{"scenarios[0].name: is required", "scenarios[1].name: is required", "scenarios[2].steps[0].name: is required"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("problems = %q, want %q", got, want)
+	}
+
+	// With names, every Ref's Scope matches the position.
+	d.Scenarios = []definition.Scenario{{Name: "s", Thresholds: []definition.ThresholdConfig{{Expr: "p95 < 1s"}}, Steps: []definition.Step{step("a", "p95 < 2s")}}}
+	d.Thresholds = []definition.ThresholdConfig{{Expr: "p95 < 3s"}}
+	bounds, err := definition.Bounds(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopes := []thresholds.ScopeKind{thresholds.ScopeTest, thresholds.ScopeScenario, thresholds.ScopeStep}
+	for i, b := range bounds {
+		if b.Ref.Scope() != scopes[i] {
+			t.Errorf("bound %d: Ref %+v has scope %s, want %s", i, b.Ref, b.Ref.Scope(), scopes[i])
+		}
 	}
 }
 

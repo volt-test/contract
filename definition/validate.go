@@ -15,9 +15,10 @@ var (
 	dataModes    = []string{"sequential", "random", "unique"}
 )
 
-// validateV2 checks the structure of a decoded v2 definition. It returns
-// nil or a *ValidationError with the problems found.
-func validateV2(d *Definition) *ValidationError {
+// validateV2 checks the structure of a decoded v2 definition. objectForms
+// holds the paths of thresholds written as objects. It returns nil or a
+// *ValidationError with the problems found.
+func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 	var ps problems
 
 	if strings.TrimSpace(d.Name) == "" {
@@ -119,7 +120,7 @@ func validateV2(d *Definition) *ValidationError {
 			}
 		}
 	}
-	collectBounds(d, &ps)
+	collectBounds(d, &ps, false, func(path string, _ ThresholdConfig) bool { return objectForms[path] })
 	return ps.err()
 }
 

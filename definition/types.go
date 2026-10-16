@@ -66,7 +66,7 @@ type Definition struct {
 	RegionConfig []RegionWeight `json:"region_config,omitempty" contract:"loose"`
 	// Pass/fail rules for the whole test, e.g. "p95 < 500ms" or
 	// "error_rate < 1%".
-	Thresholds []Threshold `json:"thresholds,omitempty" contract:"v2"`
+	Thresholds []ThresholdConfig `json:"thresholds,omitempty" contract:"v2"`
 
 	// Weights repeats the scenario weights (v1 only).
 	Weights []int `json:"weights,omitempty" contract:"v1,loose" jsonschema:"-"`
@@ -188,7 +188,7 @@ type Scenario struct {
 	// CSV data whose columns fill ${column} variables.
 	DataConfig *DataConfig `json:"data_config,omitempty"`
 	// Pass/fail rules for this scenario, e.g. "iteration_duration_p95 < 5s".
-	Thresholds []Threshold `json:"thresholds,omitempty" contract:"v2"`
+	Thresholds []ThresholdConfig `json:"thresholds,omitempty" contract:"v2"`
 }
 
 // DataConfig is a scenario's data source.
@@ -223,7 +223,7 @@ type Step struct {
 	// Pause after the step, e.g. "500ms".
 	ThinkTime string `json:"think_time,omitempty"`
 	// Pass/fail rules for this step, e.g. "p99 < 1s".
-	Thresholds []Threshold `json:"thresholds,omitempty" contract:"v2"`
+	Thresholds []ThresholdConfig `json:"thresholds,omitempty" contract:"v2"`
 }
 
 // Request is an HTTP request template. URL, Body and header values may

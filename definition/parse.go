@@ -132,7 +132,7 @@ func parseV2(data []byte, version SchemaVersion) (*Definition, error) {
 	if err := json.Unmarshal(data, d); err != nil {
 		return nil, decodeError(err)
 	}
-	if err := validateV2(d); err != nil {
+	if err := validateV2(d, w.objectForms); err != nil {
 		return nil, err
 	}
 	return d, nil

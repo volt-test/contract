@@ -310,11 +310,11 @@
             },
             "abort_on_fail": {
               "type": "boolean",
-              "description": "Stop the test as soon as the threshold fails. Accepted by the format;\nwhether an engine acts on it depends on the engine release."
+              "description": "Stop the test when the threshold fails. Accepted by the format;\nwhether an engine acts on it depends on the engine release."
             },
             "delay_abort": {
               "type": "string",
-              "description": "Grace period from the start of the test during which a failing\nthreshold does not abort it, e.g. \"30s\". Requires abort_on_fail."
+              "description": "Defers the abort: abort checks for this threshold start this long\nafter the run starts, e.g. \"30s\" (Go duration syntax, like the other\ndurations). The threshold is still evaluated during the delay and\nstill decides the final verdict; only the abort is deferred. The\nengine defines the exact run-start clock. Requires abort_on_fail."
             }
           },
           "additionalProperties": false,

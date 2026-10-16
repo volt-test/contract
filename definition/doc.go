@@ -78,11 +78,13 @@
 //
 // # Thresholds (v2)
 //
-// The test, each scenario and each step can carry thresholds: expression
-// strings such as "p95 < 500ms", or objects with abort settings. Parse
-// checks each expression with thresholds.Parse and its scope with
-// ValidFor; Bounds returns them with the scenario and step each applies
-// to. v1 readers ignore thresholds, and so does Parse on the v1 path.
+// The test, each scenario and each step can carry thresholds
+// (ThresholdConfig): expression strings such as "p95 < 500ms", or objects
+// with abort settings. Parse checks each expression with thresholds.Parse
+// and its scope with ValidFor, reporting problems at "thresholds[i]" for a
+// string and at "thresholds[i].expr" for an object. Bounds returns them as
+// thresholds.Bound values with the scenario and step each applies to. v1
+// readers ignore thresholds, and so does Parse on the v1 path.
 //
 // # Load model (v2)
 //
@@ -90,7 +92,4 @@
 // duration and ramp_up. Without duration each virtual user runs its
 // scenario once. A duration that is present must be greater than zero, and
 // so must every stage duration.
-//
-// Outside the standard library, this package imports only the thresholds
-// package of this module.
 package definition

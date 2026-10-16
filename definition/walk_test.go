@@ -252,6 +252,9 @@ func TestWalkerHooksAndKinds(t *testing.T) {
 	if !w.visited[reflect.TypeOf(unionObject{})] {
 		t.Error("object form of the union was not walked")
 	}
+	if want := map[string]bool{"one": true, "many[1]": true}; !reflect.DeepEqual(w.objectForms, want) {
+		t.Errorf("objectForms = %v, want %v", w.objectForms, want)
+	}
 }
 
 func TestFieldsOfShadowing(t *testing.T) {

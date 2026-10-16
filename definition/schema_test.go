@@ -36,7 +36,7 @@ func generateSchema(t *testing.T) []byte {
 			v2 = append(v2, s)
 		}
 	}
-	thresholdType := reflect.TypeOf(definition.Threshold{})
+	thresholdType := reflect.TypeOf(definition.ThresholdConfig{})
 	r := &jsonschema.Reflector{
 		RequiredFromJSONSchemaTags: true,
 		ExpandedStruct:             true,

@@ -316,7 +316,7 @@ func TestV2Problems(t *testing.T) {
 			step0(m)["thresholds"] = []any{"p95 < 1s", "iterations > 1", "iteration_duration_p95 < 1s", "p99.99 < 1s"}
 		}, []string{
 			`thresholds[0]: invalid threshold "p95 < 500": p95 is a duration and needs a unit (us, ms, s or m); did you mean "500ms"? (at offset 6)`,
-			`scenarios[0].thresholds[1]: invalid threshold "error_rate < 5": error_rate is a rate and needs "%"; did you mean "5%"? (at offset 13)`,
+			`scenarios[0].thresholds[1].expr: invalid threshold "error_rate < 5": error_rate is a rate and needs "%"; did you mean "5%"? (at offset 13)`,
 			"scenarios[0].steps[0].thresholds[1]: iterations is not available on a step; use it on the test or a scenario",
 			"scenarios[0].steps[0].thresholds[2]: iteration_duration_p95 is not available on a step; use it on the test or a scenario",
 			`scenarios[0].steps[0].thresholds[3]: invalid threshold "p99.99 < 1s": unknown metric "p99.99"; the percentiles are p50, p75, p90, p95, p99 and p99.9 (at offset 0)`,
@@ -328,9 +328,20 @@ func TestV2Problems(t *testing.T) {
 			"scenarios[0].steps[0].name: is required",
 			"scenarios[0].steps[0].thresholds[0]: iterations is not available on a step; use it on the test or a scenario",
 		}},
-		{"threshold without expr", func(m map[string]any) { m["thresholds"] = []any{map[string]any{"abort_on_fail": true}, ""} }, []string{
-			`thresholds[0]: invalid threshold "": the expression is empty; write <metric> <operator> <value>, e.g. "p95 < 500ms" (at offset 0)`,
+		{"threshold without expr", func(m map[string]any) {
+			m["thresholds"] = []any{map[string]any{"abort_on_fail": true}, "", map[string]any{"expr": " "}}
+		}, []string{
+			"thresholds[0].expr: is required",
 			`thresholds[1]: invalid threshold "": the expression is empty; write <metric> <operator> <value>, e.g. "p95 < 500ms" (at offset 0)`,
+			"thresholds[2].expr: is required",
+		}},
+		// The object form reports expression problems at .expr, even when
+		// it has no abort settings.
+		{"object form expression problems", func(m map[string]any) {
+			step0(m)["thresholds"] = []any{map[string]any{"expr": "p95 = 1s"}, map[string]any{"expr": "iterations > 1", "abort_on_fail": true}}
+		}, []string{
+			`scenarios[0].steps[0].thresholds[0].expr: invalid threshold "p95 = 1s": use "==" to compare for equality, not "=" (at offset 4)`,
+			"scenarios[0].steps[0].thresholds[1].expr: iterations is not available on a step; use it on the test or a scenario",
 		}},
 		{"delay_abort", func(m map[string]any) {
 			m["thresholds"] = []any{
@@ -546,13 +557,13 @@ func TestV2RoundTrip(t *testing.T) {
 		HTTPDebug:     true,
 		Target:        &definition.Target{URL: "https://a", IdleTimeout: "1m", BaseURL: "${base}"},
 		RegionConfig:  []definition.RegionWeight{{Region: "us", Weight: 2}},
-		Thresholds:    []definition.Threshold{{Expr: "p95 < 1s"}, {Expr: "error_rate < 1%", AbortOnFail: true, DelayAbort: "10s"}},
+		Thresholds:    []definition.ThresholdConfig{{Expr: "p95 < 1s"}, {Expr: "error_rate < 1%", AbortOnFail: true, DelayAbort: "10s"}},
 		Scenarios: []definition.Scenario{{
 			Name: "s", Description: "x", Weight: 3, ThinkTime: "1s", AutoHandleCookies: true,
-			Thresholds: []definition.Threshold{{Expr: "iterations > 1", AbortOnFail: true}},
+			Thresholds: []definition.ThresholdConfig{{Expr: "iterations > 1", AbortOnFail: true}},
 			DataConfig: &definition.DataConfig{DataSource: "a.csv", DataContent: "YQ==", DataFormat: "csv", HasHeader: true, Mode: "unique"},
 			Steps: []definition.Step{{
-				Name: "a", ThinkTime: "1ms", Thresholds: []definition.Threshold{{Expr: "ttfb_p99.9 <= 50ms"}},
+				Name: "a", ThinkTime: "1ms", Thresholds: []definition.ThresholdConfig{{Expr: "ttfb_p99.9 <= 50ms"}},
 				Request: definition.Request{Method: "POST", URL: "/a", Body: "{}", Headers: map[string]string{"A": "b"}},
 				Extract: []definition.Extract{{VariableName: "v", Selector: "p", Attribute: "href", Type: "html"}},
 			}},

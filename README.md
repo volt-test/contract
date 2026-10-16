@@ -138,7 +138,9 @@ An expression is `<metric> <operator> <value>`. Spaces around the parts
 are optional (`p99<=1s`); the value has no space before its unit
 (`500ms`). Operators: `<`, `<=`, `>`, `>=`, `==` (no `=` or `!=`). A value
 is digits with an optional fraction, then a unit: no sign, exponent or
-leading dot. Units are case-insensitive; metric names are lowercase.
+leading dot, and a non-zero value must not round to zero. Units are ASCII
+and case-insensitive, plus `µs`/`μs` for microseconds; metric names are
+lowercase.
 
 | Metrics | Kind | Value |
 |---|---|---|
@@ -148,27 +150,37 @@ leading dot. Units are case-insensitive; metric names are lowercase.
 | `error_rate`, `check_rate` | rate | a percentage: `%` required, at most 100% |
 | `requests`, `failed`, `iterations`, `dropped_iterations` | count | a plain whole number |
 | `rps` | throughput | a plain number (requests per second) |
-| `bytes_sent`, `bytes_received` | size | `b`, `kb` `mb` `gb` (×1000), `kib` `mib` `gib` (×1024), or a plain number of bytes |
+| `bytes_sent`, `bytes_received` | size | `b`, `kb` `mb` `gb` (×1000), `kib` `mib` `gib` (×1024), or a plain number of bytes; a whole number of bytes after scaling |
 
 `<agg>` is any of the request-duration names (`ttfb_p95`, `ttfb_p99.9`,
 `iteration_duration_max`); plain `ttfb` and `iteration_duration` are the
-average. Only the listed percentiles exist. `==` allows for floating
-point: `|a-b| <= 1e-9 * max(1, |a|, |b|)`, so `dropped_iterations == 0`
-holds only when nothing was dropped.
+average. Only the listed percentiles exist. `==` is exact for counts and
+sizes (`dropped_iterations == 0` holds only when nothing was dropped,
+`requests == 1000000000` fails at 1000000001); for durations, rates and
+`rps` it allows for floating point: `|a-b| <= 1e-9 * max(1, |a|, |b|)`.
 
 Scopes: every metric is allowed on the test, a scenario and a step,
 except the iteration metrics (`iteration_duration*`, `iterations`,
 `dropped_iterations`), which are allowed on the test and scenarios only.
 
-`abort_on_fail` and `delay_abort` (a grace period from the start of the
-test, a duration such as `"30s"`; it requires `abort_on_fail: true`) are
-accepted by the format. Whether an engine acts on them depends on the
-engine release; see [Compatibility](#compatibility).
+`abort_on_fail` asks the engine to stop the run when the threshold fails.
+`delay_abort` defers that abort: abort checks for the threshold start
+`delay_abort` after the run starts. The threshold is still evaluated
+during the delay and still decides the final verdict; only the abort is
+deferred. The engine defines the exact run-start clock. `delay_abort` is a
+Go duration such as `"30s"` or `"1m30s"`, like the other durations, must
+not be negative, and requires `abort_on_fail: true`. Both are accepted by
+the format; whether an engine acts on them depends on the engine release
+(see [Compatibility](#compatibility)).
 
-In Go, `thresholds.Parse` reads one expression and `definition.Bounds`
-returns every threshold of a parsed definition with the scenario and step
-it applies to. Values are held in canonical units: microseconds,
-fractions (1% is 0.01) and bytes.
+Problems with an expression are reported at `thresholds[i]` for the string
+form and at `thresholds[i].expr` for the object form.
+
+In Go, `definition.ThresholdConfig` holds a threshold as written,
+`thresholds.Parse` reads one expression, and `definition.Bounds` returns
+every threshold of a parsed definition as a `thresholds.Bound` with the
+scenario and step it applies to. Values are held in canonical units:
+microseconds, fractions (1% is 0.01) and bytes.
 
 ## Compatibility
 
