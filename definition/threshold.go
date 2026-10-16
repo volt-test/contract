@@ -109,19 +109,22 @@ func Bounds(d *Definition) ([]thresholds.Bound, error) {
 // and returns the bounds of the valid ones.
 func collectBounds(d *Definition, ps *problems) []thresholds.Bound {
 	var out []thresholds.Bound
-	add := func(path string, list []Threshold, ref thresholds.Ref) {
+	// The scope comes from where a threshold sits, not from the names in
+	// its Ref, so a blank name does not hide a scope problem.
+	add := func(path string, list []Threshold, scope thresholds.ScopeKind, ref thresholds.Ref) {
 		for i, th := range list {
-			if b, ok := checkThreshold(ps, indexPath(path, i), th, ref); ok {
+			if b, ok := checkThreshold(ps, indexPath(path, i), th, scope, ref); ok {
 				out = append(out, b)
 			}
 		}
 	}
-	add("thresholds", d.Thresholds, thresholds.Ref{})
+	add("thresholds", d.Thresholds, thresholds.ScopeTest, thresholds.Ref{})
 	for i, sc := range d.Scenarios {
 		p := "scenarios[" + strconv.Itoa(i) + "]"
-		add(p+".thresholds", sc.Thresholds, thresholds.Ref{Scenario: sc.Name})
+		add(p+".thresholds", sc.Thresholds, thresholds.ScopeScenario, thresholds.Ref{Scenario: sc.Name})
 		for j, st := range sc.Steps {
-			add(p+".steps["+strconv.Itoa(j)+"].thresholds", st.Thresholds, thresholds.Ref{Scenario: sc.Name, Step: st.Name})
+			add(p+".steps["+strconv.Itoa(j)+"].thresholds", st.Thresholds, thresholds.ScopeStep,
+				thresholds.Ref{Scenario: sc.Name, Step: st.Name})
 		}
 	}
 	return out
@@ -130,11 +133,11 @@ func collectBounds(d *Definition, ps *problems) []thresholds.Bound {
 // checkThreshold checks one threshold at path. Problems with the
 // expression are reported at path itself, whichever form the threshold
 // was written in; problems with delay_abort at path.delay_abort.
-func checkThreshold(ps *problems, path string, th Threshold, ref thresholds.Ref) (thresholds.Bound, bool) {
+func checkThreshold(ps *problems, path string, th Threshold, scope thresholds.ScopeKind, ref thresholds.Ref) (thresholds.Bound, bool) {
 	ok := true
 	parsed, err := thresholds.Parse(th.Expr)
 	if err == nil {
-		err = parsed.ValidFor(ref.Scope())
+		err = parsed.ValidFor(scope)
 	}
 	if err != nil {
 		ps.add(path, strings.TrimPrefix(err.Error(), "thresholds: "))

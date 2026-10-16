@@ -418,7 +418,7 @@ func unknownMetric(name string) string {
 // dropped_iterations) describe whole scenario runs, so they are available
 // on the test and on scenarios but not on steps. Errors are *ScopeError.
 func (t Threshold) ValidFor(k ScopeKind) error {
-	if _, ok := lookupMetric(t.Metric.Name); !ok || t.Metric.Kind == 0 {
+	if m, ok := lookupMetric(t.Metric.Name); !ok || m != t.Metric {
 		return errors.New("thresholds: the threshold has no metric from the catalog; build it with Parse")
 	}
 	switch k {

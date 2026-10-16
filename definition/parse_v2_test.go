@@ -321,6 +321,13 @@ func TestV2Problems(t *testing.T) {
 			"scenarios[0].steps[0].thresholds[2]: iteration_duration_p95 is not available on a step; use it on the test or a scenario",
 			`scenarios[0].steps[0].thresholds[3]: invalid threshold "p99.99 < 1s": unknown metric "p99.99"; the percentiles are p50, p75, p90, p95, p99 and p99.9 (at offset 0)`,
 		}},
+		{"scope by position, not by name", func(m map[string]any) {
+			step0(m)["name"] = ""
+			step0(m)["thresholds"] = []any{"iterations > 1"}
+		}, []string{
+			"scenarios[0].steps[0].name: is required",
+			"scenarios[0].steps[0].thresholds[0]: iterations is not available on a step; use it on the test or a scenario",
+		}},
 		{"threshold without expr", func(m map[string]any) { m["thresholds"] = []any{map[string]any{"abort_on_fail": true}, ""} }, []string{
 			`thresholds[0]: invalid threshold "": the expression is empty; write <metric> <operator> <value>, e.g. "p95 < 500ms" (at offset 0)`,
 			`thresholds[1]: invalid threshold "": the expression is empty; write <metric> <operator> <value>, e.g. "p95 < 500ms" (at offset 0)`,

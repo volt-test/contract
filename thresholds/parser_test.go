@@ -326,6 +326,11 @@ func TestValidFor(t *testing.T) {
 	if err := (thresholds.Threshold{}).ValidFor(thresholds.ScopeTest); err == nil {
 		t.Error("the zero Threshold is valid")
 	}
+	// A Metric built by hand is not the catalog's, even with a known name.
+	forged := thresholds.Threshold{Metric: thresholds.Metric{Name: "iterations", Kind: thresholds.KindCount}, Op: thresholds.OpGT, Value: 1}
+	if err := forged.ValidFor(thresholds.ScopeStep); err == nil || !strings.Contains(err.Error(), "build it with Parse") {
+		t.Errorf("hand-built metric: ValidFor(step) = %v", err)
+	}
 }
 
 func TestRefScope(t *testing.T) {
