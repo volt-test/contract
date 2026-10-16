@@ -164,6 +164,10 @@ func TestParseValues(t *testing.T) {
 		{"bytes_received < 1KiB", 1024},
 		{"bytes_received < 0.5mib", 524288},
 		{"bytes_sent < 1.001kb", 1001},
+		{"bytes_sent < 0.25kib", 256},
+		{"bytes_sent < 0.0009765625kib", 1},
+		{"bytes_sent < 1.5mib", 1572864},
+		{"bytes_sent < 1000000000000.000000000kb", 1e15},
 		{"bytes_sent < 1.0b", 1},
 		// Tiny but non-zero durations, rates and throughput are kept.
 		{"p95 < 0.000001us", 1e-6},
@@ -251,11 +255,18 @@ func TestParseErrors(t *testing.T) {
 		{"bytes_sent < 1000000000.000000001", 13, "bytes_sent is a size; use a whole number of bytes"},
 		{"bytes_sent < 0.1kib", 13, `use a whole number of bytes ("0.1kib" is "102.4" bytes)`},
 		{"bytes_sent < 1.0001KB", 13, `("1.0001KB" is "1000.1" bytes)`},
+		// Exact even where a float64 would round to a whole number.
+		{"bytes_sent < 1.000000000000000001gb", 13, `("1.000000000000000001gb" is "1000000000.000000001" bytes)`},
+		{"bytes_sent < 1000000000000.000000001kb", 13, `("1000000000000.000000001kb" is "1000000000000000.000001" bytes)`},
+		{"bytes_sent < 1.0000000000000000001gib", 13, `("1.0000000000000000001gib" is "1073741824.0000000001073741824" bytes)`},
+		{"bytes_sent < 4096.000000000000000001kib", 13, "use a whole number of bytes"},
 		{"bytes_sent < 0.0000000001" + strings.Repeat("0", 300) + "1kb", 13, `use a whole number of bytes ("0.0000000001000`},
 		// Greek capital Mu reads as an ASCII M, so it is not a micro sign.
 		{"p95 < 1\u039cs", 7, "\"\u039cs\" starts with the Greek capital letter Mu, not an ASCII M; write \"us\" (or \"µs\") for microseconds, or \"ms\" for milliseconds"},
 		{"p95 < 500\u039cS", 9, "Greek capital letter Mu"},
-		{"bytes_sent < 5\u039cb", 14, "Greek capital letter Mu"},
+		{"bytes_sent < 5\u039cB", 14, "\"\u039cB\" starts with the Greek capital letter Mu, not an ASCII M; write \"mb\" for megabytes (or \"mib\" for mebibytes)"},
+		{"bytes_sent < 5\u039cib", 14, `write "mb" for megabytes`},
+		{"requests > 5\u039c", 12, "requests is a count"},
 		// Units are ASCII apart from the micro forms: the Kelvin sign
 		// (U+212A) folds to "k" in Unicode but is not a unit here, nor are
 		// other look-alikes.
@@ -450,7 +461,7 @@ func TestStringExact(t *testing.T) {
 		"error_rate < 0.07%", "error_rate < 33.333333333333333333%", "check_rate > 0.000000000000000000001%",
 		"p95 < 0.1ms", "p95 < 0.3us", "p95 < 123456789.987654321s", "p95 < 0.7m", "p95 < 1.1m",
 		"rps > 0.1", "rps > 179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
-		"bytes_sent < 0.3kb", "bytes_sent < 0.25kib", "bytes_sent < 1.000000000000000001gb",
+		"bytes_sent < 0.3kb", "bytes_sent < 0.25kib", "bytes_sent < 1.000000000000000000gb", "bytes_sent < 0.0009765625kib",
 		"p95 < 0." + strings.Repeat("0", 300) + "1us", "p95 < 0.000000000000000000000000000001us",
 	} {
 		th, err := thresholds.Parse(expr)

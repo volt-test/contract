@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 	"unicode"
@@ -329,7 +330,13 @@ func hasNonZeroDigit(number string) bool {
 // when the problem is the unit rather than the number.
 func value(m Metric, number, unit string, whole bool) (v float64, msg string, atUnit bool) {
 	if strings.HasPrefix(unit, "\u039c") {
-		return 0, fmt.Sprintf(`%s starts with the Greek capital letter Mu, not an ASCII M; write "us" (or "µs") for microseconds, or "ms" for milliseconds`, quoteShort(unit)), true
+		const mu = "%s starts with the Greek capital letter Mu, not an ASCII M; "
+		switch m.Kind {
+		case KindDuration:
+			return 0, fmt.Sprintf(mu+`write "us" (or "µs") for microseconds, or "ms" for milliseconds`, quoteShort(unit)), true
+		case KindSize:
+			return 0, fmt.Sprintf(mu+`write "mb" for megabytes (or "mib" for mebibytes)`, quoteShort(unit)), true
+		}
 	}
 	u, ascii := normalizeUnit(unit)
 	if !ascii {
@@ -402,37 +409,69 @@ func value(m Metric, number, unit string, whole bool) (v float64, msg string, at
 		}
 		return scale(0, 1)
 	case KindSize:
-		var v float64
-		var msg string
+		// Wholeness is decided exactly from the literal, before any float
+		// rounding: the decimal point is moved as text for the x1000 units,
+		// and the x1024 units are multiplied as exact rationals.
+		var exp int
+		var pow2 uint
 		switch u {
 		case "", "b":
 			// Unscaled: the literal itself must be whole, as for counts.
 			if !whole {
 				return 0, fmt.Sprintf("%s is a size; use a whole number of bytes", m.Name), false
 			}
-			v, msg, _ = scale(0, 1)
+			return scale(0, 1)
 		case "kb":
-			v, msg, _ = scale(3, 1)
+			exp = 3
 		case "mb":
-			v, msg, _ = scale(6, 1)
+			exp = 6
 		case "gb":
-			v, msg, _ = scale(9, 1)
+			exp = 9
 		case "kib":
-			v, msg, _ = scale(0, 1<<10)
+			pow2 = 10
 		case "mib":
-			v, msg, _ = scale(0, 1<<20)
+			pow2 = 20
 		case "gib":
-			v, msg, _ = scale(0, 1<<30)
+			pow2 = 30
 		default:
 			return badUnit("%s is a size; use b, kb, mb, gb, kib, mib or gib (or a plain number of bytes), not %s")
 		}
-		if msg == "" && v != math.Trunc(v) {
+		if bytes, ok := wholeBytes(number, exp, pow2); !ok {
 			return 0, fmt.Sprintf("%s is a size; use a whole number of bytes (%s is %s bytes)",
-				m.Name, quoteShort(number+unit), quoteShort(strconv.FormatFloat(v, 'f', -1, 64))), false
+				m.Name, quoteShort(number+unit), quoteShort(bytes)), false
 		}
-		return v, msg, false
+		if pow2 > 0 {
+			return scale(0, float64(uint64(1)<<pow2))
+		}
+		return scale(exp, 1)
 	}
 	return 0, "unknown metric kind", false
+}
+
+// wholeBytes computes number x 10^exp x 2^pow2 exactly and reports whether
+// it is a whole number, with its exact decimal form for messages. One of
+// exp and pow2 is zero.
+func wholeBytes(number string, exp int, pow2 uint) (string, bool) {
+	if pow2 == 0 {
+		s := shiftDecimal(number, exp)
+		return s, !strings.Contains(s, ".")
+	}
+	r, ok := new(big.Rat).SetString(number)
+	if !ok {
+		return number, false // not reached: the parser checked the syntax
+	}
+	r.Mul(r, new(big.Rat).SetInt(new(big.Int).Lsh(big.NewInt(1), pow2)))
+	if r.IsInt() {
+		return r.Num().String(), true
+	}
+	// The denominator divides a power of ten no larger than the literal's,
+	// so this many fraction digits are exact.
+	_, frac, _ := strings.Cut(number, ".")
+	s := r.FloatString(len(frac))
+	if strings.Contains(s, ".") {
+		s = strings.TrimRight(strings.TrimRight(s, "0"), ".")
+	}
+	return s, false
 }
 
 // unknownMetric describes an unknown metric name, with a hint.
