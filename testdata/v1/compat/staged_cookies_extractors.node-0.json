@@ -1,0 +1,162 @@
+{
+  "name": "v1 compat: staged cookies extractors",
+  "description": "v1 compatibility fixture",
+  "virtual_users": 0,
+  "duration": "",
+  "ramp_up": "",
+  "target": {
+    "url": "http://demo-target:8080"
+  },
+  "scenarios": [
+    {
+      "name": "Form login",
+      "weight": 70,
+      "think_time": "1s",
+      "auto_handle_cookies": true,
+      "steps": [
+        {
+          "name": "Login form",
+          "request": {
+            "method": "GET",
+            "url": "http://demo-target:8080/forms/login"
+          },
+          "extract": [
+            {
+              "variable_name": "csrf",
+              "selector": "input[name=_token]",
+              "type": "html",
+              "attribute": "value"
+            },
+            {
+              "variable_name": "csrf_cookie",
+              "selector": "csrf_token",
+              "type": "cookie"
+            }
+          ],
+          "validate": [
+            {
+              "name": "form",
+              "type": "status_code",
+              "expected": 200
+            }
+          ]
+        },
+        {
+          "name": "Submit login",
+          "request": {
+            "method": "POST",
+            "url": "http://demo-target:8080/forms/login",
+            "headers": {
+              "Content-Type": "application/x-www-form-urlencoded"
+            },
+            "body": "_token=${csrf}&username=v1&password=example-password"
+          },
+          "extract": [
+            {
+              "variable_name": "session_id",
+              "selector": "\"session\":\"([a-f0-9]+)\"",
+              "type": "regex"
+            }
+          ],
+          "validate": [
+            {
+              "name": "logged in",
+              "type": "status_code",
+              "expected": 200
+            }
+          ]
+        },
+        {
+          "name": "Headers echo",
+          "request": {
+            "method": "GET",
+            "url": "http://demo-target:8080/headers",
+            "headers": {
+              "X-Session": "${session_id}"
+            }
+          },
+          "extract": [
+            {
+              "variable_name": "content_type",
+              "selector": "Content-Type",
+              "type": "header"
+            }
+          ],
+          "validate": [
+            {
+              "name": "headers",
+              "type": "status_code",
+              "expected": 200
+            }
+          ]
+        }
+      ],
+      "data_config": {}
+    },
+    {
+      "name": "API",
+      "weight": 30,
+      "steps": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "url": "http://demo-target:8080/api/login",
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "body": "{\"email\":\"v1@example.com\",\"password\":\"example-password\"}"
+          },
+          "extract": [
+            {
+              "variable_name": "token",
+              "selector": "$.data.token",
+              "type": "json"
+            }
+          ],
+          "validate": [
+            {
+              "name": "logged in",
+              "type": "status_code",
+              "expected": 200
+            }
+          ]
+        },
+        {
+          "name": "Cart",
+          "request": {
+            "method": "POST",
+            "url": "http://demo-target:8080/api/cart",
+            "headers": {
+              "Authorization": "Bearer ${token}",
+              "Content-Type": "application/json"
+            },
+            "body": "{\"product_id\": 1, \"quantity\": 1}"
+          },
+          "validate": [
+            {
+              "name": "cart",
+              "type": "status_code",
+              "expected": 201
+            }
+          ]
+        }
+      ],
+      "data_config": {}
+    }
+  ],
+  "stages": [
+    {
+      "duration": "10s",
+      "target": 10
+    },
+    {
+      "duration": "10s",
+      "target": 20
+    },
+    {
+      "duration": "5s",
+      "target": 0
+    }
+  ]
+}

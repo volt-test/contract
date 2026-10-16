@@ -1,0 +1,48 @@
+{
+  "schema_version": "2.0",
+  "name": "Staged",
+  "http_timeout": "30s",
+  "stages": [
+    {
+      "duration": "30s",
+      "target": 20
+    },
+    {
+      "duration": "0s",
+      "target": 100
+    },
+    {
+      "duration": "30s",
+      "target": 0
+    }
+  ],
+  "target": {
+    "url": "https://api.example.com"
+  },
+  "scenarios": [
+    {
+      "name": "API",
+      "weight": 1,
+      "steps": [
+        {
+          "name": "List",
+          "request": {
+            "method": "GET",
+            "url": "https://api.example.com/items?page=1"
+          }
+        },
+        {
+          "name": "Create",
+          "request": {
+            "method": "POST",
+            "url": "https://api.example.com/items",
+            "body": "{\"name\":\"x\"}",
+            "headers": {}
+          },
+          "extract": [],
+          "think_time": "200ms"
+        }
+      ]
+    }
+  ]
+}

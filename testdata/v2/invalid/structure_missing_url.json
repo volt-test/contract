@@ -1,0 +1,19 @@
+{
+  "schema_version": "2.0",
+  "name": "Minimal",
+  "virtual_users": 1,
+  "duration": "30s",
+  "scenarios": [
+    {
+      "name": "Home",
+      "steps": [
+        {
+          "name": "Get home",
+          "request": {
+            "method": "GET"
+          }
+        }
+      ]
+    }
+  ]
+}

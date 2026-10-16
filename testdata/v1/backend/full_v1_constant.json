@@ -1,0 +1,173 @@
+{
+  "name": "v1 full",
+  "description": "Every field SDK 1.x and the engine CLI emit",
+  "virtual_users": 50,
+  "duration": "60s",
+  "ramp_up": "10s",
+  "http_timeout": "15s",
+  "target": {
+    "url": "http://demo-target:8080",
+    "idle_timeout": "30s"
+  },
+  "scenarios": [
+    {
+      "name": "Shopper",
+      "steps": [
+        {
+          "name": "Login form",
+          "request": {
+            "method": "GET",
+            "url": "http://demo-target:8080/forms/login",
+            "body": "",
+            "header": {
+              "Accept": "text/html"
+            }
+          },
+          "extract": [
+            {
+              "variable_name": "csrf",
+              "selector": "input[name=_token]",
+              "attribute": "value",
+              "type": "html"
+            },
+            {
+              "variable_name": "session",
+              "selector": "session",
+              "attribute": "",
+              "type": "cookie"
+            },
+            {
+              "variable_name": "req_id",
+              "selector": "X-Request-Id",
+              "attribute": "",
+              "type": "header"
+            }
+          ],
+          "validate": [
+            {
+              "name": "form loaded",
+              "selector": "",
+              "expected": 200,
+              "type": "status_code"
+            }
+          ],
+          "think_time": "500ms"
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "url": "http://demo-target:8080/api/login",
+            "body": "{\"email\":\"${email}\",\"password\":\"${password}\"}",
+            "header": {
+              "Content-Type": "application/json"
+            }
+          },
+          "extract": [
+            {
+              "variable_name": "token",
+              "selector": "$.data.token",
+              "attribute": "",
+              "type": "json"
+            },
+            {
+              "variable_name": "user_id",
+              "selector": "\"id\":(\\d+)",
+              "attribute": "",
+              "type": "regex"
+            }
+          ],
+          "validate": [
+            {
+              "name": "logged in",
+              "selector": "",
+              "expected": 200,
+              "type": "status_code"
+            }
+          ],
+          "think_time": ""
+        },
+        {
+          "name": "Checkout",
+          "request": {
+            "method": "POST",
+            "url": "http://demo-target:8080/api/checkout",
+            "body": "{\"cart_id\":\"1\"}",
+            "header": {
+              "Authorization": "Bearer ${token}",
+              "Content-Type": "application/json"
+            }
+          },
+          "extract": [],
+          "validate": [
+            {
+              "name": "order confirmed",
+              "selector": "",
+              "expected": 200,
+              "type": "status_code"
+            }
+          ],
+          "think_time": ""
+        }
+      ],
+      "description": "Logs in with CSV credentials and checks out",
+      "weight": 70,
+      "think_time": "1s",
+      "auto_handle_cookies": true,
+      "data_config": {
+        "data_source": "users.csv",
+        "data_content": "ZW1haWwscGFzc3dvcmQKdXNlcjFAZXhhbXBsZS5jb20sZXhhbXBsZS1wYXNzd29yZC0xCnVzZXIyQGV4YW1wbGUuY29tLGV4YW1wbGUtcGFzc3dvcmQtMgo=",
+        "data_format": "csv",
+        "has_header": true,
+        "mode": "unique"
+      }
+    },
+    {
+      "name": "Browser",
+      "steps": [
+        {
+          "name": "Products",
+          "request": {
+            "method": "GET",
+            "url": "http://demo-target:8080/api/products?page=1",
+            "body": "",
+            "header": null
+          },
+          "extract": [
+            {
+              "variable_name": "product_id",
+              "selector": "$.data[0].id",
+              "attribute": "",
+              "type": "json"
+            }
+          ],
+          "validate": [
+            {
+              "name": "listed",
+              "selector": "",
+              "expected": 200,
+              "type": "status_code"
+            }
+          ],
+          "think_time": ""
+        }
+      ],
+      "description": "",
+      "weight": 30,
+      "think_time": "",
+      "auto_handle_cookies": false,
+      "data_config": {
+        "data_source": "",
+        "data_format": "",
+        "has_header": false,
+        "mode": ""
+      }
+    }
+  ],
+  "weights": [
+    70,
+    30
+  ],
+  "http_debug": true,
+  "report_type": ""
+}

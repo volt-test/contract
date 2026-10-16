@@ -1,0 +1,63 @@
+{
+  "name": "CLI cloud run",
+  "description": "What the SDK sends the CLI for a cloud run",
+  "virtual_users": 25,
+  "duration": "1m",
+  "ramp_up": "10s",
+  "http_timeout": "20s",
+  "target": {
+    "url": "https://shop.example.com",
+    "idle_timeout": "30s"
+  },
+  "scenarios": [
+    {
+      "name": "Browse",
+      "description": "",
+      "weight": 100,
+      "think_time": "250ms",
+      "auto_handle_cookies": false,
+      "steps": [
+        {
+          "name": "Home",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/",
+            "body": "",
+            "header": {
+              "Accept": "text/html"
+            }
+          },
+          "extract": [],
+          "validate": [
+            {
+              "name": "ok",
+              "type": "status_code",
+              "expected": 200
+            }
+          ],
+          "think_time": ""
+        }
+      ]
+    }
+  ],
+  "weights": [
+    100
+  ],
+  "http_debug": false,
+  "report_type": "json",
+  "region_config": [
+    {
+      "region": "us-east",
+      "weight": 60
+    },
+    {
+      "region": "eu-west",
+      "weight": 40
+    }
+  ],
+  "cloud": true,
+  "api_key": "vt_example_0000000000000000",
+  "cloud_timeout": 900,
+  "existing_test_id": "00000000-0000-0000-0000-000000000000",
+  "skip_lookup": true
+}

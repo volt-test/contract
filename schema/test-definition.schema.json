@@ -1,0 +1,357 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/volt-test/contract/main/schema/test-definition.schema.json",
+  "$defs": {
+    "DataConfig": {
+      "anyOf": [
+        {
+          "required": [
+            "data_source"
+          ]
+        },
+        {
+          "required": [
+            "data_content"
+          ]
+        }
+      ],
+      "properties": {
+        "data_source": {
+          "type": "string",
+          "description": "Name or path of the CSV file."
+        },
+        "data_content": {
+          "type": "string",
+          "description": "Base64-encoded content of the CSV file."
+        },
+        "data_format": {
+          "type": "string",
+          "enum": [
+            "csv"
+          ],
+          "description": "File format."
+        },
+        "has_header": {
+          "type": "boolean",
+          "description": "The first row holds column names."
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "sequential",
+            "random",
+            "unique"
+          ],
+          "description": "How virtual users take rows: in order, at random, or each row once."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "data_format",
+        "mode"
+      ],
+      "description": "A CSV data source. Each virtual user takes rows according to mode."
+    },
+    "Extract": {
+      "properties": {
+        "variable_name": {
+          "type": "string",
+          "pattern": "\\S",
+          "description": "Name of the variable that receives the value."
+        },
+        "selector": {
+          "type": "string",
+          "pattern": "\\S",
+          "description": "What to read, by type: a JSON path, a regex, a header name, a cookie\nname or a CSS selector."
+        },
+        "attribute": {
+          "type": "string",
+          "description": "HTML attribute to read, for type html."
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "json",
+            "regex",
+            "header",
+            "cookie",
+            "html"
+          ],
+          "description": "Where to read the value from."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "variable_name",
+        "selector",
+        "type"
+      ],
+      "description": "A value to capture from the response."
+    },
+    "RegionWeight": {
+      "properties": {
+        "region": {
+          "type": "string",
+          "pattern": "\\S",
+          "description": "Cloud region name."
+        },
+        "weight": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Relative share of the virtual users."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "region"
+      ],
+      "description": "One cloud region's share of the virtual users."
+    },
+    "Request": {
+      "properties": {
+        "method": {
+          "type": "string",
+          "minLength": 1,
+          "description": "HTTP method, e.g. \"GET\"."
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "description": "An absolute http(s) URL, a URL starting with ${variable}, or a path\nstarting with \"/\" that is appended to target.base_url."
+        },
+        "body": {
+          "type": "string",
+          "description": "Request body."
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Request headers."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "method",
+        "url"
+      ],
+      "description": "An HTTP request. The URL, body and header values may contain ${variable} references."
+    },
+    "Scenario": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "\\S",
+          "description": "Scenario name, unique within the test."
+        },
+        "description": {
+          "type": "string",
+          "description": "Free-text description of the scenario."
+        },
+        "weight": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Relative chance that a virtual user runs this scenario."
+        },
+        "think_time": {
+          "type": "string",
+          "description": "Pause after each run of the scenario, e.g. \"1s\"."
+        },
+        "auto_handle_cookies": {
+          "type": "boolean",
+          "description": "Keep cookies between the steps of a run."
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/Step"
+          },
+          "type": "array",
+          "minItems": 1,
+          "description": "Steps, run in order."
+        },
+        "data_config": {
+          "$ref": "#/$defs/DataConfig",
+          "description": "CSV data whose columns fill ${column} variables."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name",
+        "steps"
+      ],
+      "description": "A sequence of steps that a virtual user runs."
+    },
+    "Stage": {
+      "properties": {
+        "duration": {
+          "type": "string",
+          "minLength": 1,
+          "description": "How long the stage lasts, e.g. \"1m\"."
+        },
+        "target": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of virtual users at the end of the stage."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "duration"
+      ],
+      "description": "One stage of a staged load profile."
+    },
+    "Step": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "\\S",
+          "description": "Step name, unique within the scenario."
+        },
+        "request": {
+          "$ref": "#/$defs/Request",
+          "description": "The HTTP request to send."
+        },
+        "extract": {
+          "items": {
+            "$ref": "#/$defs/Extract"
+          },
+          "type": "array",
+          "description": "Values to capture from the response into ${variable_name}."
+        },
+        "think_time": {
+          "type": "string",
+          "description": "Pause after the step, e.g. \"500ms\"."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name",
+        "request"
+      ],
+      "description": "One HTTP request in a scenario."
+    },
+    "Target": {
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "URL of the system under test, for reports. Requests go to the step URLs."
+        },
+        "idle_timeout": {
+          "type": "string",
+          "description": "How long an idle keep-alive connection stays open, e.g. \"30s\"."
+        },
+        "base_url": {
+          "type": "string",
+          "description": "Base URL that step URLs starting with \"/\" are appended to. An absolute\nhttp(s) URL or a ${variable}, without a query string or fragment."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "The system under test."
+    }
+  },
+  "anyOf": [
+    {
+      "properties": {
+        "stages": {
+          "minItems": 1
+        }
+      },
+      "required": [
+        "stages"
+      ]
+    },
+    {
+      "properties": {
+        "virtual_users": {
+          "minimum": 1
+        }
+      },
+      "required": [
+        "virtual_users"
+      ]
+    }
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": [
+        "2.0"
+      ],
+      "description": "Format version of this definition: \"2.0\"."
+    },
+    "name": {
+      "type": "string",
+      "pattern": "\\S",
+      "description": "Name of the test."
+    },
+    "description": {
+      "type": "string",
+      "description": "Free-text description of the test."
+    },
+    "virtual_users": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Constant load: number of virtual users (at least 1). Use instead of\nstages."
+    },
+    "duration": {
+      "type": "string",
+      "description": "Constant load: how long the test runs, e.g. \"5m\". Leave it out to have\neach virtual user run its scenario once."
+    },
+    "ramp_up": {
+      "type": "string",
+      "description": "Constant load: time to start all virtual users, e.g. \"30s\"."
+    },
+    "stages": {
+      "items": {
+        "$ref": "#/$defs/Stage"
+      },
+      "type": "array",
+      "description": "Staged load: each stage moves to its target number of virtual users\nover its duration. Use instead of virtual_users, duration and ramp_up."
+    },
+    "http_timeout": {
+      "type": "string",
+      "description": "Timeout for each HTTP request, e.g. \"30s\"."
+    },
+    "http_debug": {
+      "type": "boolean",
+      "description": "Log request and response details."
+    },
+    "target": {
+      "$ref": "#/$defs/Target",
+      "description": "The system under test."
+    },
+    "scenarios": {
+      "items": {
+        "$ref": "#/$defs/Scenario"
+      },
+      "type": "array",
+      "minItems": 1,
+      "description": "Scenarios that virtual users run, picked at random by weight."
+    },
+    "region_config": {
+      "items": {
+        "$ref": "#/$defs/RegionWeight"
+      },
+      "type": "array",
+      "description": "Share of the virtual users per cloud region."
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "schema_version",
+    "name",
+    "scenarios"
+  ],
+  "title": "VoltTest test definition",
+  "description": "A VoltTest load test: the load profile, the system under test and the scenarios that virtual users run."
+}
