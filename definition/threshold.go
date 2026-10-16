@@ -113,7 +113,7 @@ func Bounds(d *Definition) ([]thresholds.Bound, error) {
 		return nil, nil
 	}
 	var ps problems
-	out := collectBounds(d, &ps, true, func(_ string, t ThresholdConfig) bool { return t.usesObjectForm() })
+	out := collectBounds(d, &ps, true, true, func(_ string, t ThresholdConfig) bool { return t.usesObjectForm() })
 	if err := ps.err(); err != nil {
 		return nil, err
 	}
@@ -121,18 +121,19 @@ func Bounds(d *Definition) ([]thresholds.Bound, error) {
 }
 
 // collectBounds checks every threshold of d, records the problems in ps
-// and returns the bounds of the valid ones. checkNames requires a name on
-// every scenario and step that carries thresholds (validateV2 checks names
-// itself). objectForm reports whether the threshold at a path was written
-// as an object.
-func collectBounds(d *Definition, ps *problems, checkNames bool, objectForm func(path string, t ThresholdConfig) bool) []thresholds.Bound {
+// and, when keep is set, returns the bounds of the valid ones (validateV2
+// only checks, so it does not build the slice). checkNames requires a name
+// on every scenario and step that carries thresholds (validateV2 checks
+// names itself). objectForm reports whether the threshold at a path was
+// written as an object.
+func collectBounds(d *Definition, ps *problems, keep, checkNames bool, objectForm func(path string, t ThresholdConfig) bool) []thresholds.Bound {
 	var out []thresholds.Bound
 	// The scope comes from where a threshold sits, not from the names in
 	// its Ref, so a blank name does not hide a scope problem.
 	add := func(path string, list []ThresholdConfig, scope thresholds.ScopeKind, ref thresholds.Ref) {
 		for i, th := range list {
 			p := indexPath(path, i)
-			if b, ok := checkThreshold(ps, p, th, objectForm(p, th), scope, ref); ok {
+			if b, ok := checkThreshold(ps, p, th, objectForm(p, th), scope, ref); ok && keep {
 				out = append(out, b)
 			}
 		}

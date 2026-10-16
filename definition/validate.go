@@ -120,7 +120,7 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 			}
 		}
 	}
-	collectBounds(d, &ps, false, func(path string, _ ThresholdConfig) bool { return objectForms[path] })
+	collectBounds(d, &ps, false, false, func(path string, _ ThresholdConfig) bool { return objectForms[path] })
 	return ps.err()
 }
 

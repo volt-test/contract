@@ -2,6 +2,7 @@ package thresholds_test
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"reflect"
 	"strings"
@@ -122,8 +123,6 @@ func TestParseValues(t *testing.T) {
 		{"p95 < 1us", 1},
 		{"p95 < 1µs", 1}, // micro sign U+00B5
 		{"p95 < 1μs", 1}, // Greek mu U+03BC
-		{"p95 < 1ΜS", 1}, // Greek capital mu
-		{"p95 < 1Μs", 1},
 		{"p95 < 1µS", 1},
 		{"p95 < 1US", 1}, // upper case
 		{"p95 < 2.5us", 2.5},
@@ -247,9 +246,16 @@ func TestParseErrors(t *testing.T) {
 		{"bytes_sent < 5ms", 14, `bytes_sent is a size; use b, kb, mb, gb, kib, mib or gib (or a plain number of bytes), not "ms"`},
 		{"bytes_sent < 5%", 14, `bytes_sent is a size`},
 		// Sizes are whole numbers of bytes.
-		{"bytes_sent < 0.5", 13, "bytes_sent is a size; use a whole number of bytes (0.5 is 0.5 bytes)"},
-		{"bytes_sent < 0.1kib", 13, "use a whole number of bytes (0.1kib is 102.4 bytes)"},
-		{"bytes_sent < 1.0001KB", 13, "(1.0001KB is 1000.1 bytes)"},
+		{"bytes_sent < 0.5", 13, "bytes_sent is a size; use a whole number of bytes"},
+		{"bytes_sent < 1.5b", 13, "bytes_sent is a size; use a whole number of bytes"},
+		{"bytes_sent < 1000000000.000000001", 13, "bytes_sent is a size; use a whole number of bytes"},
+		{"bytes_sent < 0.1kib", 13, `use a whole number of bytes ("0.1kib" is "102.4" bytes)`},
+		{"bytes_sent < 1.0001KB", 13, `("1.0001KB" is "1000.1" bytes)`},
+		{"bytes_sent < 0.0000000001" + strings.Repeat("0", 300) + "1kb", 13, `use a whole number of bytes ("0.0000000001000`},
+		// Greek capital Mu reads as an ASCII M, so it is not a micro sign.
+		{"p95 < 1\u039cs", 7, "\"\u039cs\" starts with the Greek capital letter Mu, not an ASCII M; write \"us\" (or \"µs\") for microseconds, or \"ms\" for milliseconds"},
+		{"p95 < 500\u039cS", 9, "Greek capital letter Mu"},
+		{"bytes_sent < 5\u039cb", 14, "Greek capital letter Mu"},
 		// Units are ASCII apart from the micro forms: the Kelvin sign
 		// (U+212A) folds to "k" in Unicode but is not a unit here, nor are
 		// other look-alikes.
@@ -287,6 +293,19 @@ func TestParseErrorText(t *testing.T) {
 	want := `thresholds: invalid threshold "p95 < 500": p95 is a duration and needs a unit (us, ms, s or m); did you mean "500ms"? (at offset 6)`
 	if err == nil || err.Error() != want {
 		t.Errorf("error = %v\nwant    %s", err, want)
+	}
+
+	// Hints that repeat the number are cut too, however long it is.
+	for _, expr := range []string{
+		"p90 > " + strings.Repeat("1", 5000),
+		"error_rate < " + strings.Repeat("1", 5000),
+		"error_rate < 0." + strings.Repeat("1", 5000),
+		"bytes_sent < 0." + strings.Repeat("1", 5000) + "kib",
+	} {
+		_, err := thresholds.Parse(expr)
+		if err == nil || len(err.Error()) > 1024 {
+			t.Errorf("Parse(%.20q...) error is %d bytes", expr, len(fmt.Sprint(err)))
+		}
 	}
 
 	// A long expression is cut in the message, on a UTF-8 boundary.

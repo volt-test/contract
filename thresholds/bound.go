@@ -24,10 +24,17 @@ func (r Ref) Scope() ScopeKind {
 
 // Bound is a threshold attached to a part of a test, with its abort
 // settings. definition.Bounds builds the bounds of a test definition.
+//
+// A Bound encodes to JSON with its Go field names, the metric as its name
+// ("Metric":"p95") and the enums by name, and decodes back to an equal
+// Bound. That form is for passing bounds between Go programs that use this
+// package; it is not the public wire format of threshold results. A reader
+// must know every metric the writer used: an unknown metric name fails to
+// decode.
 type Bound struct {
 	Ref       Ref
 	Threshold Threshold
-	// AbortOnFail asks the engine to stop the test as soon as the threshold
+	// AbortOnFail asks the engine to stop the test when the threshold
 	// fails. Whether an engine acts on it depends on the engine release.
 	AbortOnFail bool
 	// DelayAbort defers the abort: abort checks for this threshold start

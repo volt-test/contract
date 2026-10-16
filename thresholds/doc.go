@@ -16,8 +16,9 @@
 // an optional unit. It has no sign, no exponent and no leading dot, and a
 // value with a non-zero digit must not round to zero.
 // Units are ASCII and case-insensitive ("500MS" is "500ms"), except that
-// the micro prefix may be written us, µs (micro sign) or μs (Greek mu, in
-// either case). Metric names are case-sensitive.
+// the micro prefix may be written us, µs (micro sign) or μs (lowercase
+// Greek mu). Greek capital Mu is rejected, because it reads as an ASCII
+// M. Metric names are case-sensitive.
 //
 // # Metrics
 //

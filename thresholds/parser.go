@@ -106,15 +106,19 @@ const maxEcho = 128
 
 // quoteShort quotes s for an error message, cut to about maxEcho bytes on a
 // UTF-8 boundary.
-func quoteShort(s string) string {
-	if len(s) > maxEcho {
-		cut := maxEcho
-		for cut > 0 && !utf8.RuneStart(s[cut]) {
-			cut--
-		}
-		s = s[:cut] + "..."
+func quoteShort(s string) string { return strconv.Quote(cutShort(s)) }
+
+// cutShort cuts s to about maxEcho bytes on a UTF-8 boundary, marking the
+// cut with "...".
+func cutShort(s string) string {
+	if len(s) <= maxEcho {
+		return s
 	}
-	return strconv.Quote(s)
+	cut := maxEcho
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
 }
 
 func isSpace(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }
@@ -291,12 +295,13 @@ func decimal(number string, exp int) (float64, bool) {
 }
 
 // normalizeUnit lowercases a unit for matching. Units are ASCII apart from
-// the micro prefix, which may be written as µ (U+00B5, micro sign), μ
-// (U+03BC, Greek small mu) or Μ (U+039C, Greek capital mu) and becomes
-// "u". Only ASCII letters are folded, so look-alikes such as the Kelvin
-// sign (U+212A) match no unit. ok is false for any other non-ASCII rune.
+// the micro prefix, which may be written as µ (U+00B5, micro sign) or μ
+// (U+03BC, Greek small mu) and becomes "u". Only ASCII letters are folded,
+// so look-alikes such as the Kelvin sign (U+212A) and Greek capital Mu
+// (U+039C, which reads as an ASCII M) match no unit. ok is false for any
+// other non-ASCII rune.
 func normalizeUnit(unit string) (u string, ok bool) {
-	for _, micro := range []string{"\u00b5", "\u03bc", "\u039c"} {
+	for _, micro := range []string{"\u00b5", "\u03bc"} {
 		if strings.HasPrefix(unit, micro) {
 			unit = "u" + unit[len(micro):]
 			break
@@ -323,6 +328,9 @@ func hasNonZeroDigit(number string) bool {
 // returns a message when the value does not fit the metric; atUnit is set
 // when the problem is the unit rather than the number.
 func value(m Metric, number, unit string, whole bool) (v float64, msg string, atUnit bool) {
+	if strings.HasPrefix(unit, "\u039c") {
+		return 0, fmt.Sprintf(`%s starts with the Greek capital letter Mu, not an ASCII M; write "us" (or "µs") for microseconds, or "ms" for milliseconds`, quoteShort(unit)), true
+	}
 	u, ascii := normalizeUnit(unit)
 	if !ascii {
 		u = "\x00" // matches no unit
@@ -358,7 +366,7 @@ func value(m Metric, number, unit string, whole bool) (v float64, msg string, at
 		case "m":
 			return scale(6, 60)
 		case "":
-			return 0, fmt.Sprintf("%s is a duration and needs a unit (us, ms, s or m); did you mean %s?", m.Name, strconv.Quote(number+"ms")), false
+			return 0, fmt.Sprintf("%s is a duration and needs a unit (us, ms, s or m); did you mean %s?", m.Name, quoteShort(number+"ms")), false
 		case "ns":
 			return 0, `"ns" is not supported; the smallest unit is us (microseconds)`, true
 		}
@@ -372,10 +380,10 @@ func value(m Metric, number, unit string, whole bool) (v float64, msg string, at
 			}
 			return v, msg, false
 		case "":
-			hint := strconv.Quote(number + "%")
+			hint := quoteShort(number + "%")
 			if v, ok := decimal(number, 0); ok && v <= 1 {
 				pct := shiftDecimal(number, 2)
-				hint = fmt.Sprintf("%s (or %s if %s is a fraction)", hint, strconv.Quote(pct+"%"), number)
+				hint = fmt.Sprintf("%s (or %s if %s is a fraction)", hint, quoteShort(pct+"%"), cutShort(number))
 			}
 			return 0, fmt.Sprintf(`%s is a rate and needs "%%"; did you mean %s?`, m.Name, hint), false
 		}
@@ -398,6 +406,10 @@ func value(m Metric, number, unit string, whole bool) (v float64, msg string, at
 		var msg string
 		switch u {
 		case "", "b":
+			// Unscaled: the literal itself must be whole, as for counts.
+			if !whole {
+				return 0, fmt.Sprintf("%s is a size; use a whole number of bytes", m.Name), false
+			}
 			v, msg, _ = scale(0, 1)
 		case "kb":
 			v, msg, _ = scale(3, 1)
@@ -416,7 +428,7 @@ func value(m Metric, number, unit string, whole bool) (v float64, msg string, at
 		}
 		if msg == "" && v != math.Trunc(v) {
 			return 0, fmt.Sprintf("%s is a size; use a whole number of bytes (%s is %s bytes)",
-				m.Name, number+unit, strconv.FormatFloat(v, 'f', -1, 64)), false
+				m.Name, quoteShort(number+unit), quoteShort(strconv.FormatFloat(v, 'f', -1, 64))), false
 		}
 		return v, msg, false
 	}

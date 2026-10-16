@@ -107,7 +107,7 @@ func generateSchema(t *testing.T) []byte {
 }
 
 // thresholdSchema describes a threshold: the expression string, or the
-// object form reflected from the Threshold struct (with its field
+// object form reflected from the ThresholdConfig struct (with its field
 // comments).
 func thresholdSchema(t *testing.T, typ reflect.Type) *jsonschema.Schema {
 	t.Helper()

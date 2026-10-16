@@ -139,8 +139,9 @@ are optional (`p99<=1s`); the value has no space before its unit
 (`500ms`). Operators: `<`, `<=`, `>`, `>=`, `==` (no `=` or `!=`). A value
 is digits with an optional fraction, then a unit: no sign, exponent or
 leading dot, and a non-zero value must not round to zero. Units are ASCII
-and case-insensitive, plus `µs`/`μs` for microseconds; metric names are
-lowercase.
+and case-insensitive, plus `µs` (micro sign) or `μs` (lowercase Greek mu)
+for microseconds; Greek capital Mu is rejected because it reads as an ASCII
+`M`. Metric names are lowercase.
 
 | Metrics | Kind | Value |
 |---|---|---|
@@ -150,7 +151,7 @@ lowercase.
 | `error_rate`, `check_rate` | rate | a percentage: `%` required, at most 100% |
 | `requests`, `failed`, `iterations`, `dropped_iterations` | count | a plain whole number |
 | `rps` | throughput | a plain number (requests per second) |
-| `bytes_sent`, `bytes_received` | size | `b`, `kb` `mb` `gb` (×1000), `kib` `mib` `gib` (×1024), or a plain number of bytes; a whole number of bytes after scaling |
+| `bytes_sent`, `bytes_received` | size | `b`, `kb` `mb` `gb` (×1000), `kib` `mib` `gib` (×1024), or a plain number of bytes; the value must be a whole number of bytes |
 
 `<agg>` is any of the request-duration names (`ttfb_p95`, `ttfb_p99.9`,
 `iteration_duration_max`); plain `ttfb` and `iteration_duration` are the
