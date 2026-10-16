@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: Build, vet, test (Go ${{ matrix.go }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Use exactly the Go that setup-go installed; never auto-download another.
+      GOTOOLCHAIN: local
+    strategy:
+      fail-fast: false
+      matrix:
+        # 1.23.0 is the go.mod floor (what the engine builds with).
+        go: ['1.23.0', 'stable']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            go.mod
+
+      - name: Go version
+        run: go version
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Unit tests (race)
+        run: go test -race -count=1 ./...
+
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .); if [ -n "$out" ]; then echo "$out"; exit 1; fi
+
+      # Consumers pin this module; keep go.mod minimal and the go line at the
+      # engine's floor so importing it never forces a toolchain bump.
+      - name: Module hygiene
+        run: |
+          set -euo pipefail
+          go mod tidy -diff
+          gover=$(go mod edit -json | jq -r .Go)
+          if [ "$gover" != "1.23.0" ]; then
+            echo "go directive is $gover, must be 1.23.0"; exit 1
+          fi
+          if [ "$(go mod edit -json | jq '(.Replace // []) | length')" != "0" ]; then
+            echo "go.mod must not contain replace directives"; exit 1
+          fi
+          if [ "$(go mod edit -json | jq -r '.Toolchain // empty')" != "" ]; then
+            echo "go.mod must not contain a toolchain line"; exit 1
+          fi
+          # The omitzero struct tag option changes behaviour with the
+          # toolchain; the engine builds with 1.23.
+          if grep -rnE --include='*.go' '[,"]omitzero' .; then
+            echo "the omitzero tag option is not allowed"; exit 1
+          fi
+
+      # Runtime (non-test) dependencies per package. Allowed third-party
+      # imports are listed per package; anything else fails the build.
+      - name: Runtime dependency guard
+        run: |
+          set -euo pipefail
+          mod=github.com/volt-test/contract
+          allowed_deps() {
+            case "$1" in
+              "$mod/thresholds"|"$mod/thresholds/"*) echo "github.com/HdrHistogram/hdrhistogram-go" ;;
+              *) echo "" ;;
+            esac
+          }
+          fail=0
+          pkgs=$(go list ./...)
+          for pkg in $pkgs; do
+            allowed=" $(allowed_deps "$pkg") "
+            deps=$(go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}' "$pkg" \
+              | awk -v m="$mod" 'NF && $0 != m && index($0, m "/") != 1')
+            for dep in $deps; do
+              case "$allowed" in
+                *" $dep "*) ;;
+                *) echo "$pkg: dependency $dep is not allowed"; fail=1 ;;
+              esac
+            done
+          done
+          exit $fail
