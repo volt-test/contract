@@ -7,7 +7,7 @@ import (
 	"github.com/volt-test/contract/thresholds"
 )
 
-// T11: Parse never panics; whatever it accepts prints in a canonical form
+// Parse never panics; whatever it accepts prints in a canonical form
 // that parses back to the same threshold.
 func FuzzParse(f *testing.F) {
 	for _, s := range []string{

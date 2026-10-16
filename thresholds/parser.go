@@ -290,41 +290,66 @@ func decimal(number string, exp int) (float64, bool) {
 	return v, true
 }
 
-const (
-	tooLarge     = "the value is too large"
-	rateAbove100 = "a rate cannot exceed 100%"
-)
+// normalizeUnit lowercases a unit for matching. Units are ASCII apart from
+// the micro prefix, which may be written as µ (U+00B5, micro sign), μ
+// (U+03BC, Greek small mu) or Μ (U+039C, Greek capital mu) and becomes
+// "u". Only ASCII letters are folded, so look-alikes such as the Kelvin
+// sign (U+212A) match no unit. ok is false for any other non-ASCII rune.
+func normalizeUnit(unit string) (u string, ok bool) {
+	for _, micro := range []string{"\u00b5", "\u03bc", "\u039c"} {
+		if strings.HasPrefix(unit, micro) {
+			unit = "u" + unit[len(micro):]
+			break
+		}
+	}
+	b := []byte(unit)
+	for i, c := range b {
+		switch {
+		case c >= utf8.RuneSelf:
+			return "", false
+		case c >= 'A' && c <= 'Z':
+			b[i] = c + ('a' - 'A')
+		}
+	}
+	return string(b), true
+}
+
+// hasNonZeroDigit reports whether a decimal literal is not zero.
+func hasNonZeroDigit(number string) bool {
+	return strings.ContainsAny(number, "123456789")
+}
 
 // value converts a number and unit to the canonical unit of m's kind. It
 // returns a message when the value does not fit the metric; atUnit is set
 // when the problem is the unit rather than the number.
 func value(m Metric, number, unit string, whole bool) (v float64, msg string, atUnit bool) {
-	v, msg = valueOf(m, number, unit, whole)
-	// With a unit, every message is about the unit except those about the
-	// size of the number.
-	if msg == "" || msg == tooLarge || msg == rateAbove100 || unit == "" {
-		return v, msg, false
+	u, ascii := normalizeUnit(unit)
+	if !ascii {
+		u = "\x00" // matches no unit
 	}
-	return 0, msg, true
-}
-
-func valueOf(m Metric, number, unit string, whole bool) (float64, string) {
-	u := strings.ToLower(unit)
-	scale := func(exp int, factor float64) (float64, string) {
+	// scale returns number x 10^exp x factor, or a message when that does
+	// not fit a float64.
+	scale := func(exp int, factor float64) (float64, string, bool) {
 		v, ok := decimal(number, exp)
 		if !ok {
-			return 0, tooLarge
+			return 0, "the value is too large", false
 		}
 		v *= factor
 		if math.IsInf(v, 0) {
-			return 0, tooLarge
+			return 0, "the value is too large", false
 		}
-		return v, ""
+		if v == 0 && hasNonZeroDigit(number) {
+			return 0, "the value is too small", false
+		}
+		return v, "", false
+	}
+	badUnit := func(format string) (float64, string, bool) {
+		return 0, fmt.Sprintf(format, m.Name, quoteShort(unit)), true
 	}
 	switch m.Kind {
 	case KindDuration:
 		switch u {
-		case "us", "µs", "μs":
+		case "us":
 			return scale(0, 1)
 		case "ms":
 			return scale(3, 1)
@@ -333,61 +358,69 @@ func valueOf(m Metric, number, unit string, whole bool) (float64, string) {
 		case "m":
 			return scale(6, 60)
 		case "":
-			return 0, fmt.Sprintf("%s is a duration and needs a unit (us, ms, s or m); did you mean %s?", m.Name, strconv.Quote(number+"ms"))
+			return 0, fmt.Sprintf("%s is a duration and needs a unit (us, ms, s or m); did you mean %s?", m.Name, strconv.Quote(number+"ms")), false
 		case "ns":
-			return 0, `"ns" is not supported; the smallest unit is us (microseconds)`
+			return 0, `"ns" is not supported; the smallest unit is us (microseconds)`, true
 		}
-		return 0, fmt.Sprintf("%s is a duration; use us, ms, s or m, not %s", m.Name, quoteShort(unit))
+		return badUnit("%s is a duration; use us, ms, s or m, not %s")
 	case KindRate:
 		switch u {
 		case "%":
-			v, msg := scale(-2, 1)
+			v, msg, _ := scale(-2, 1)
 			if msg == "" && v > 1 {
-				return 0, rateAbove100
+				return 0, "a rate cannot exceed 100%", false
 			}
-			return v, msg
+			return v, msg, false
 		case "":
 			hint := strconv.Quote(number + "%")
 			if v, ok := decimal(number, 0); ok && v <= 1 {
 				pct := shiftDecimal(number, 2)
 				hint = fmt.Sprintf("%s (or %s if %s is a fraction)", hint, strconv.Quote(pct+"%"), number)
 			}
-			return 0, fmt.Sprintf(`%s is a rate and needs "%%"; did you mean %s?`, m.Name, hint)
+			return 0, fmt.Sprintf(`%s is a rate and needs "%%"; did you mean %s?`, m.Name, hint), false
 		}
-		return 0, fmt.Sprintf("%s is a rate; write a percentage such as 5%%, not %s", m.Name, quoteShort(unit))
+		return badUnit("%s is a rate; write a percentage such as 5%%, not %s")
 	case KindCount:
-		if u != "" {
-			return 0, fmt.Sprintf("%s is a count; write a plain number such as 100, without %s", m.Name, quoteShort(unit))
+		if unit != "" {
+			return badUnit("%s is a count; write a plain number such as 100, without %s")
 		}
 		if !whole {
-			return 0, fmt.Sprintf("%s is a count; use a whole number", m.Name)
+			return 0, fmt.Sprintf("%s is a count; use a whole number", m.Name), false
 		}
 		return scale(0, 1)
 	case KindThroughput:
-		if u != "" {
-			return 0, fmt.Sprintf("%s is requests per second; write a plain number such as 100, without %s", m.Name, quoteShort(unit))
+		if unit != "" {
+			return badUnit("%s is requests per second; write a plain number such as 100, without %s")
 		}
 		return scale(0, 1)
 	case KindSize:
+		var v float64
+		var msg string
 		switch u {
 		case "", "b":
-			return scale(0, 1)
+			v, msg, _ = scale(0, 1)
 		case "kb":
-			return scale(3, 1)
+			v, msg, _ = scale(3, 1)
 		case "mb":
-			return scale(6, 1)
+			v, msg, _ = scale(6, 1)
 		case "gb":
-			return scale(9, 1)
+			v, msg, _ = scale(9, 1)
 		case "kib":
-			return scale(0, 1<<10)
+			v, msg, _ = scale(0, 1<<10)
 		case "mib":
-			return scale(0, 1<<20)
+			v, msg, _ = scale(0, 1<<20)
 		case "gib":
-			return scale(0, 1<<30)
+			v, msg, _ = scale(0, 1<<30)
+		default:
+			return badUnit("%s is a size; use b, kb, mb, gb, kib, mib or gib (or a plain number of bytes), not %s")
 		}
-		return 0, fmt.Sprintf("%s is a size; use b, kb, mb, gb, kib, mib or gib (or a plain number of bytes), not %s", m.Name, quoteShort(unit))
+		if msg == "" && v != math.Trunc(v) {
+			return 0, fmt.Sprintf("%s is a size; use a whole number of bytes (%s is %s bytes)",
+				m.Name, number+unit, strconv.FormatFloat(v, 'f', -1, 64)), false
+		}
+		return v, msg, false
 	}
-	return 0, "unknown metric kind"
+	return 0, "unknown metric kind", false
 }
 
 // unknownMetric describes an unknown metric name, with a hint.
@@ -506,9 +539,16 @@ func shiftDecimal(s string, n int) string {
 	return intPart + "." + frac
 }
 
-// equalWithin reports whether a and b are equal for the == operator: within
-// a relative tolerance of 1e-9, and an absolute one of 1e-9 near zero:
-// |a-b| <= 1e-9 * max(1, |a|, |b|).
-func equalWithin(a, b float64) bool {
+// equal reports whether a measured value a and a bound b are equal for
+// the == operator. Counts and sizes are whole numbers and compare exactly.
+// Durations, rates and throughput are derived by floating-point
+// arithmetic, so they compare with a tolerance:
+//
+//	|a-b| <= 1e-9 * max(1, |a|, |b|)
+func equal(k Kind, a, b float64) bool {
+	switch k {
+	case KindCount, KindSize:
+		return a == b
+	}
 	return math.Abs(a-b) <= 1e-9*math.Max(1, math.Max(math.Abs(a), math.Abs(b)))
 }

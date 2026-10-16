@@ -10,7 +10,7 @@ import (
 	"github.com/volt-test/contract/thresholds"
 )
 
-// T1: the catalog, literally.
+// The catalog, literally.
 func TestMetrics(t *testing.T) {
 	want := []string{
 		"avg", "bytes_received", "bytes_sent", "check_rate", "dropped_iterations", "error_rate", "failed",
@@ -47,7 +47,7 @@ func kindOf(name string) thresholds.Kind {
 	return thresholds.KindDuration
 }
 
-// T2: every metric parses with a value of its kind.
+// Every metric parses with a value of its kind.
 func TestParseEveryMetric(t *testing.T) {
 	values := map[thresholds.Kind]struct {
 		text string
@@ -86,7 +86,7 @@ func TestParseEveryMetric(t *testing.T) {
 	}
 }
 
-// T3: every operator, with and without spaces.
+// Every operator, with and without spaces.
 func TestParseOperators(t *testing.T) {
 	ops := map[string]thresholds.Op{"<": thresholds.OpLT, "<=": thresholds.OpLE, ">": thresholds.OpGT, ">=": thresholds.OpGE, "==": thresholds.OpEQ}
 	for text, op := range ops {
@@ -112,7 +112,7 @@ func TestParseOperators(t *testing.T) {
 	}
 }
 
-// T4: every value form and unit, in any case.
+// Every value form and unit, in any case.
 func TestParseValues(t *testing.T) {
 	cases := []struct {
 		expr string
@@ -123,6 +123,8 @@ func TestParseValues(t *testing.T) {
 		{"p95 < 1µs", 1}, // micro sign U+00B5
 		{"p95 < 1μs", 1}, // Greek mu U+03BC
 		{"p95 < 1ΜS", 1}, // Greek capital mu
+		{"p95 < 1Μs", 1},
+		{"p95 < 1µS", 1},
 		{"p95 < 1US", 1}, // upper case
 		{"p95 < 2.5us", 2.5},
 		{"p95 < 500ms", 500000},
@@ -162,6 +164,11 @@ func TestParseValues(t *testing.T) {
 		{"bytes_received < 1kib", 1024},
 		{"bytes_received < 1KiB", 1024},
 		{"bytes_received < 0.5mib", 524288},
+		{"bytes_sent < 1.001kb", 1001},
+		{"bytes_sent < 1.0b", 1},
+		// Tiny but non-zero durations, rates and throughput are kept.
+		{"p95 < 0.000001us", 1e-6},
+		{"rps > 0.0001", 1e-4},
 		{"bytes_received < 2gib", 2 << 30},
 		{"bytes_received < 2GIB", 2 << 30},
 	}
@@ -177,7 +184,7 @@ func TestParseValues(t *testing.T) {
 	}
 }
 
-// T5: invalid expressions, with the position and message of the error.
+// Invalid expressions, with the position and message of the error.
 func TestParseErrors(t *testing.T) {
 	cases := []struct {
 		expr string
@@ -239,6 +246,21 @@ func TestParseErrors(t *testing.T) {
 		{"rps > 10s", 8, `without "s"`},
 		{"bytes_sent < 5ms", 14, `bytes_sent is a size; use b, kb, mb, gb, kib, mib or gib (or a plain number of bytes), not "ms"`},
 		{"bytes_sent < 5%", 14, `bytes_sent is a size`},
+		// Sizes are whole numbers of bytes.
+		{"bytes_sent < 0.5", 13, "bytes_sent is a size; use a whole number of bytes (0.5 is 0.5 bytes)"},
+		{"bytes_sent < 0.1kib", 13, "use a whole number of bytes (0.1kib is 102.4 bytes)"},
+		{"bytes_sent < 1.0001KB", 13, "(1.0001KB is 1000.1 bytes)"},
+		// Units are ASCII apart from the micro forms: the Kelvin sign
+		// (U+212A) folds to "k" in Unicode but is not a unit here, nor are
+		// other look-alikes.
+		{"bytes_sent < 5\u212ab", 14, "bytes_sent is a size; use b, kb, mb, gb, kib, mib or gib (or a plain number of bytes), not \"\u212ab\""},
+		{"bytes_sent < 5\u212aib", 14, "is a size"},
+		{"p95 < 5m\u0455", 7, "p95 is a duration"},       // Cyrillic dze
+		{"p95 < 5\u00b5\u00b5s", 7, "p95 is a duration"}, // two micro signs
+		{"p95 < 5u\u00b5s", 7, "p95 is a duration"},
+		// A non-zero value that rounds to zero.
+		{"p95 < 0." + strings.Repeat("0", 330) + "1us", 6, "the value is too small"},
+		{"error_rate < 0." + strings.Repeat("0", 330) + "1%", 13, "the value is too small"},
 		// Values that do not fit a float64.
 		{"rps > 1" + strings.Repeat("0", 400), 6, "the value is too large"},
 		{"bytes_sent < 1" + strings.Repeat("0", 300) + "gib", 13, "the value is too large"},
@@ -282,7 +304,7 @@ func TestParseErrorText(t *testing.T) {
 	}
 }
 
-// T6: which metrics each scope accepts.
+// Which metrics each scope accepts.
 func TestValidFor(t *testing.T) {
 	notOnSteps := map[string]bool{"iterations": true, "dropped_iterations": true}
 	for _, name := range thresholds.Metrics() {
@@ -389,7 +411,6 @@ func TestString(t *testing.T) {
 		"bytes_sent < 1500000":        "bytes_sent < 1.5mb",
 		"bytes_received<2gib":         "bytes_received < 2.147483648gb",
 		"bytes_received < 12b":        "bytes_received < 12b",
-		"bytes_received < 0.5":        "bytes_received < 0.5b",
 		"iteration_duration_max < 2m": "iteration_duration_max < 120s",
 	}
 	for expr, want := range cases {
@@ -410,8 +431,8 @@ func TestStringExact(t *testing.T) {
 		"error_rate < 0.07%", "error_rate < 33.333333333333333333%", "check_rate > 0.000000000000000000001%",
 		"p95 < 0.1ms", "p95 < 0.3us", "p95 < 123456789.987654321s", "p95 < 0.7m", "p95 < 1.1m",
 		"rps > 0.1", "rps > 179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
-		"bytes_sent < 0.3kb", "bytes_sent < 0.1kib", "bytes_sent < 1.000000000000000001gb",
-		"p95 < 0." + strings.Repeat("0", 400) + "1us",
+		"bytes_sent < 0.3kb", "bytes_sent < 0.25kib", "bytes_sent < 1.000000000000000001gb",
+		"p95 < 0." + strings.Repeat("0", 300) + "1us", "p95 < 0.000000000000000000000000000001us",
 	} {
 		th, err := thresholds.Parse(expr)
 		if err != nil {

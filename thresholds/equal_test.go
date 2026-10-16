@@ -2,35 +2,44 @@ package thresholds
 
 import "testing"
 
-// T12: the == tolerance and the examples in the package documentation.
-func TestEqualWithin(t *testing.T) {
+// The == comparison and the examples in the package documentation.
+func TestEqual(t *testing.T) {
 	cases := []struct {
+		kind Kind
 		a, b float64
 		want bool
 	}{
 		// "dropped_iterations == 0": counts compare exactly.
-		{0, 0, true},
-		{1, 0, false},
-		{3, 3, true},
+		{KindCount, 0, 0, true},
+		{KindCount, 1, 0, false},
+		{KindCount, 3, 3, true},
+		// Exact at any scale, where a relative tolerance would reach 1.
+		{KindCount, 1e9, 1e9 + 1, false},
+		{KindCount, 5e9, 5e9 + 5, false},
+		{KindSize, 1e9, 1e9 + 1, false},
+		{KindSize, 5e9, 5e9 + 5, false},
+		{KindSize, 5e9, 5e9, true},
 		// "p95 == 200ms" (200000us): within 0.0002us of 200000us.
-		{200000, 200000, true},
-		{200000.0001, 200000, true},
-		{199999.9999, 200000, true},
-		{200000.0003, 200000, false},
-		{199999.9997, 200000, false},
+		{KindDuration, 200000, 200000, true},
+		{KindDuration, 200000.0001, 200000, true},
+		{KindDuration, 199999.9999, 200000, true},
+		{KindDuration, 200000.0003, 200000, false},
+		{KindDuration, 199999.9997, 200000, false},
 		// Near zero the tolerance is absolute, 1e-9.
-		{1e-10, 0, true},
-		{0, 5e-10, true},
-		{2e-9, 0, false},
+		{KindRate, 1e-10, 0, true},
+		{KindRate, 0, 5e-10, true},
+		{KindRate, 2e-9, 0, false},
+		{KindThroughput, 1e-10, 0, true},
+		{KindThroughput, 100, 100.000001, false},
 		// 0.07% parsed and measured the same way.
-		{0.07 / 100, 0.0007, true},
+		{KindRate, 0.07 / 100, 0.0007, true},
 	}
 	for _, tc := range cases {
-		if got := equalWithin(tc.a, tc.b); got != tc.want {
-			t.Errorf("equalWithin(%v, %v) = %v, want %v", tc.a, tc.b, got, tc.want)
+		if got := equal(tc.kind, tc.a, tc.b); got != tc.want {
+			t.Errorf("equal(%s, %v, %v) = %v, want %v", tc.kind, tc.a, tc.b, got, tc.want)
 		}
-		if got := equalWithin(tc.b, tc.a); got != tc.want {
-			t.Errorf("equalWithin(%v, %v) is not symmetric", tc.b, tc.a)
+		if got := equal(tc.kind, tc.b, tc.a); got != tc.want {
+			t.Errorf("equal(%s, %v, %v) is not symmetric", tc.kind, tc.b, tc.a)
 		}
 	}
 

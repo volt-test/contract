@@ -13,8 +13,11 @@
 // The operators are <, <=, >, >= and ==. There is no "=" or "!=".
 //
 // A value is digits with an optional fraction ("5", "0.5", "99.95") and
-// an optional unit. It has no sign, no exponent and no leading dot.
-// Units are case-insensitive ("500MS" is "500ms"); metric names are not.
+// an optional unit. It has no sign, no exponent and no leading dot, and a
+// value with a non-zero digit must not round to zero.
+// Units are ASCII and case-insensitive ("500MS" is "500ms"), except that
+// the micro prefix may be written us, µs (micro sign) or μs (Greek mu, in
+// either case). Metric names are case-sensitive.
 //
 // # Metrics
 //
@@ -51,8 +54,8 @@
 //	rate        %; required                               fraction (1% = 0.01)
 //	count       none; a whole number                      the count
 //	throughput  none                                      requests per second
-//	size        b, kb, mb, gb (x1000), kib, mib, gib      bytes
-//	            (x1024), or none for bytes
+//	size        b, kb, mb, gb (x1000), kib, mib, gib      bytes; a whole number
+//	            (x1024), or none for bytes                of bytes
 //
 // A duration without a unit ("p95 < 500") is rejected, and so is "ns". A
 // rate without "%" ("error_rate < 0.05") is rejected rather than guessed
@@ -69,19 +72,20 @@
 //
 // # Equality
 //
-// == compares with a small tolerance, because measured values are
-// floating point: a and b are equal when
+// For counts and sizes, which are whole numbers, == is exact:
+// "dropped_iterations == 0" holds only when no iteration was dropped, and
+// "requests == 1000000000" fails at 1000000001.
+//
+// Durations, rates and rps are computed in floating point, so == compares
+// them with a small tolerance: a and b are equal when
 //
 //	|a-b| <= 1e-9 * max(1, |a|, |b|)
 //
-// For counts this is exact equality: "dropped_iterations == 0" holds only
-// when no iteration was dropped. For "p95 == 200ms" (200000us) any value
-// within 0.0002us of 200000us is equal.
+// For "p95 == 200ms" (200000us) any value within 0.0002us of 200000us is
+// equal.
 //
 // # Canonical form
 //
 // Threshold.String prints a threshold in canonical form, such as
 // "p95 < 500ms" for "p95<0.5s"; parsing it gives back the same threshold.
-//
-// This package imports only the standard library.
 package thresholds

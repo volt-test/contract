@@ -30,8 +30,10 @@ type Bound struct {
 	// AbortOnFail asks the engine to stop the test as soon as the threshold
 	// fails. Whether an engine acts on it depends on the engine release.
 	AbortOnFail bool
-	// DelayAbort is a grace period from the start of the test during which
-	// a failing threshold does not abort it; 0 means none. It only applies
-	// with AbortOnFail.
+	// DelayAbort defers the abort: abort checks for this threshold start
+	// DelayAbort after the run starts. The threshold is still evaluated
+	// during the delay and still decides the final verdict; only the abort
+	// is deferred. The runner defines the exact run-start clock. 0 means
+	// no delay. It only applies with AbortOnFail.
 	DelayAbort time.Duration
 }
