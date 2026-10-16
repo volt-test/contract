@@ -79,8 +79,11 @@ jobs:
             echo "the omitzero tag option is not allowed"; exit 1
           fi
 
-      # Runtime (non-test) dependencies per package. Allowed third-party
-      # imports are listed per package; anything else fails the build.
+      # Runtime (non-test) dependencies per package, transitive included.
+      # Allowed third-party imports are listed per package; anything else
+      # fails the build. thresholds (and its subpackages) may use
+      # hdrhistogram-go; definition imports thresholds, so it may reach
+      # hdrhistogram-go too, and nothing else.
       - name: Runtime dependency guard
         run: |
           set -euo pipefail
@@ -88,6 +91,7 @@ jobs:
           allowed_deps() {
             case "$1" in
               "$mod/thresholds"|"$mod/thresholds/"*) echo "github.com/HdrHistogram/hdrhistogram-go" ;;
+              "$mod/definition") echo "github.com/HdrHistogram/hdrhistogram-go" ;;
               *) echo "" ;;
             esac
           }
