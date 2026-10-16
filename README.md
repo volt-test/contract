@@ -10,7 +10,12 @@ itself is proprietary and is not part of this repository.
 | Package | Contents |
 |---|---|
 | `definition` | Test-definition types, `Parse`, schema_version checks |
-| `thresholds` | Threshold expressions: parser, metric catalog, scopes (evaluation coming) |
+| `thresholds` | Threshold expressions (parser, metric catalog, scopes) and the evaluator: snapshots, node merge, results |
+
+Runtime dependency: `thresholds` uses
+[hdrhistogram-go](https://github.com/HdrHistogram/hdrhistogram-go) for
+percentiles, and `definition` imports `thresholds`, so both depend on it.
+There are no other runtime dependencies.
 
 The JSON Schema for v2 definitions is
 [`schema/test-definition.schema.json`](schema/test-definition.schema.json).
@@ -176,6 +181,34 @@ the format; whether an engine acts on them depends on the engine release
 
 Problems with an expression are reported at `thresholds[i]` for the string
 form and at `thresholds[i].expr` for the object form.
+
+### Results
+
+`thresholds.Evaluate` checks the bounds against a snapshot of the run's
+measurements (per test, scenario and step) and returns one result per
+threshold:
+
+```json
+[
+  {"scope": "test", "expr": "p95 < 500ms", "actual": 412.5, "unit": "ms", "status": "passed", "passed": true},
+  {"scope": "scenario", "scenario": "Browse", "expr": "error_rate < 1%", "actual": 1.6, "unit": "%", "status": "failed", "passed": false},
+  {"scope": "step", "scenario": "Browse", "step": "Home", "expr": "p99 < 1s", "actual": null, "unit": "ms", "status": "no_data", "passed": false}
+]
+```
+
+- `actual` is in `unit`: `ms` for durations (to the microsecond), `%` for
+  rates, `bytes` for sizes, `req/s` for `rps`, and `""` for counts.
+- `status` is `passed`, `failed` or `no_data`. `no_data` (with a null
+  `actual`) means there was nothing to measure: no requests for a rate, no
+  values for a duration, a counter the engine did not measure, or a
+  scenario or step that never ran. The run passes only if every threshold
+  passed, so `no_data` fails the final verdict; but it never aborts a
+  running test.
+- Percentiles come from the scope's HDR histogram (microseconds, 1µs to
+  1h, 3 significant figures). Rates, averages and `rps` are computed from
+  the scope's own counters over the run's wall-clock window, so a run
+  merged from several nodes gets the run's numbers, not averages of the
+  nodes' numbers.
 
 In Go, `definition.ThresholdConfig` holds a threshold as written,
 `thresholds.Parse` reads one expression, and `definition.Bounds` returns
