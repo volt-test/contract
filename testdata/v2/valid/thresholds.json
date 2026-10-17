@@ -1,0 +1,73 @@
+{
+  "schema_version": "2.0",
+  "name": "Thresholds at every scope",
+  "virtual_users": 20,
+  "duration": "1m",
+  "target": {
+    "base_url": "https://shop.example.com"
+  },
+  "thresholds": [
+    "p95 < 500ms",
+    "error_rate < 1%",
+    "dropped_iterations == 0",
+    "rps>=50",
+    {
+      "expr": "p99.9 <= 2s",
+      "abort_on_fail": true,
+      "delay_abort": "30s"
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "Browse",
+      "weight": 3,
+      "thresholds": [
+        "iteration_duration_p95 < 5s",
+        "iterations > 100",
+        {
+          "expr": "check_rate >= 99.5%",
+          "abort_on_fail": true
+        }
+      ],
+      "steps": [
+        {
+          "name": "Home",
+          "request": {
+            "method": "GET",
+            "url": "/"
+          },
+          "thresholds": [
+            "ttfb_p99 < 300ms",
+            "bytes_received < 2MiB"
+          ]
+        },
+        {
+          "name": "Search",
+          "request": {
+            "method": "GET",
+            "url": "/search?q=shoes"
+          },
+          "thresholds": [
+            {
+              "expr": "failed == 0",
+              "abort_on_fail": true,
+              "delay_abort": "10s"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Checkout",
+      "steps": [
+        {
+          "name": "Cart",
+          "request": {
+            "method": "GET",
+            "url": "/cart"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -35,12 +35,20 @@ func derefType(t reflect.Type) reflect.Type {
 	return t
 }
 
+var objectFormCache sync.Map // reflect.Type -> reflect.Type (nil when t has no object form)
+
 // objectFormOf returns the struct type to walk for object input, or nil.
 func objectFormOf(t reflect.Type) reflect.Type {
-	if !reflect.PointerTo(t).Implements(objectFormerType) {
-		return nil
+	if f, ok := objectFormCache.Load(t); ok {
+		form, _ := f.(reflect.Type)
+		return form
 	}
-	return derefType(reflect.TypeOf(reflect.New(t).Interface().(objectFormer).objectForm()))
+	var form reflect.Type
+	if reflect.PointerTo(t).Implements(objectFormerType) {
+		form = derefType(reflect.TypeOf(reflect.New(t).Interface().(objectFormer).objectForm()))
+	}
+	objectFormCache.Store(t, form)
+	return form
 }
 
 // kindProblem checks a non-null JSON value against a Go type that is not a
@@ -249,6 +257,9 @@ type walker struct {
 	problems problemList
 	// visited, when non-nil, records each struct type whose object was walked.
 	visited map[reflect.Type]bool
+	// objectForms records the paths of values written in the object form
+	// of a type that also has a non-object form (a threshold object).
+	objectForms map[string]bool
 }
 
 func (w *walker) problem(path, msg string) {
@@ -330,6 +341,10 @@ func (w *walker) walk(raw json.RawMessage, t reflect.Type, path string) {
 	}
 	t = derefType(t)
 	if form := objectFormOf(t); form != nil && raw[0] == '{' {
+		if w.objectForms == nil {
+			w.objectForms = map[string]bool{}
+		}
+		w.objectForms[path] = true
 		w.walkStruct(raw, form, path)
 		return
 	}

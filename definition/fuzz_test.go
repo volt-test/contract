@@ -17,6 +17,7 @@ func FuzzParse(f *testing.F) {
 		``, `null`, `{}`, `[]`, `{"schema_version":"2.0"}`, `{"schema_version":null}`,
 		`{"schema_version":"2.0","scenarios":[null,{"steps":[{"request":null}]}]}`,
 		`{"schema_version":"2.0","name":"x","scenarios":[{"name":"a","steps":[{"name":"b","request":{"method":"GET","url":"/x"}}]}],"target":{"base_url":"${b}"}}`,
+		`{"schema_version":"2.0","name":"x","virtual_users":1,"thresholds":["p95<1s",{"expr":"iterations>1","abort_on_fail":true,"delay_abort":"1s"},{"expr":"rps>1","delay_abort":""}],"scenarios":[{"name":"a","thresholds":["iterations>1"],"steps":[{"name":"b","thresholds":["error_rate<1%"],"request":{"method":"GET","url":"https://x/"}}]}]}`,
 		`{"Schema_Version":"x","scenarios":[{"steps":[{"validate":[{"expected":{"a":[1,null]}}]}]}]}`,
 	} {
 		f.Add([]byte(s))

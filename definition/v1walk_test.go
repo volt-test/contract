@@ -81,7 +81,10 @@ var v1ReadSet = map[string]string{
 	"scenarios[].steps[].request.headers": "loose",
 	"scenarios[].data_config.data_download_url": "loose",
 
-	"target.base_url": "v2",
+	"target.base_url":                "v2",
+	"thresholds":                     "v2",
+	"scenarios[].thresholds":         "v2",
+	"scenarios[].steps[].thresholds": "v2",
 }
 
 type classified struct {
@@ -333,6 +336,8 @@ func TestV1RewriteMatchesDirectDecode(t *testing.T) {
 		}
 		direct.SchemaVersion = d.SchemaVersion
 		direct.APIKey = NewSecret(w.APIKey)
+		// The v1 path drops v2-only keys, which encoding/json reads.
+		clearV2Only(reflect.ValueOf(direct).Elem())
 		if !reflect.DeepEqual(d, direct) {
 			t.Errorf("doc %d: Parse differs from encoding/json:\n got %+v\nwant %+v", i, d, direct)
 		}
@@ -403,8 +408,16 @@ type mirrorScenario struct {
 	Weight            int              `json:"weight"`
 	ThinkTime         string           `json:"think_time"`
 	AutoHandleCookies bool             `json:"auto_handle_cookies"`
-	Steps             []Step           `json:"steps"`
+	Steps             []mirrorStep     `json:"steps"`
 	DataConfig        mirrorDataConfig `json:"data_config"`
+}
+
+type mirrorStep struct {
+	Name      string            `json:"name"`
+	Request   Request           `json:"request"`
+	Extract   []Extract         `json:"extract"`
+	Validate  []LegacyValidator `json:"validate"`
+	ThinkTime string            `json:"think_time"`
 }
 
 type mirrorDataConfig struct {
@@ -432,7 +445,14 @@ func toMirror(d *Definition) mirrorDefinition {
 	}
 	for i, sc := range d.Scenarios {
 		ms := mirrorScenario{Name: sc.Name, Description: sc.Description, Weight: sc.Weight,
-			ThinkTime: sc.ThinkTime, AutoHandleCookies: sc.AutoHandleCookies, Steps: sc.Steps}
+			ThinkTime: sc.ThinkTime, AutoHandleCookies: sc.AutoHandleCookies}
+		if sc.Steps != nil {
+			ms.Steps = make([]mirrorStep, len(sc.Steps))
+		}
+		for j, st := range sc.Steps {
+			ms.Steps[j] = mirrorStep{Name: st.Name, Request: st.Request, Extract: st.Extract,
+				Validate: st.Validate, ThinkTime: st.ThinkTime}
+		}
 		if dc := sc.DataConfig; dc != nil {
 			ms.DataConfig = mirrorDataConfig(*dc)
 		}
@@ -520,4 +540,31 @@ func FuzzV1MatchesEncodingJSON(f *testing.F) {
 			t.Fatalf("Parse differs from encoding/json:\n got %+v\nwant %+v\n%s", got, mirror, data)
 		}
 	})
+}
+
+// clearV2Only zeroes every contract:"v2" field reachable from v.
+func clearV2Only(v reflect.Value) {
+	switch v.Kind() {
+	case reflect.Pointer:
+		if !v.IsNil() {
+			clearV2Only(v.Elem())
+		}
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < v.Len(); i++ {
+			clearV2Only(v.Index(i))
+		}
+	case reflect.Struct:
+		t := v.Type()
+		for i := 0; i < t.NumField(); i++ {
+			sf := t.Field(i)
+			if !sf.IsExported() {
+				continue
+			}
+			if contractFlags(sf.Tag)["v2"] {
+				v.Field(i).SetZero()
+				continue
+			}
+			clearV2Only(v.Field(i))
+		}
+	}
 }

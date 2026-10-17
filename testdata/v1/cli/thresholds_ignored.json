@@ -1,0 +1,42 @@
+{
+  "name": "v1 definition with thresholds keys",
+  "virtual_users": 2,
+  "duration": "10s",
+  "target": {
+    "url": "https://api.example.com",
+    "idle_timeout": "30s"
+  },
+  "thresholds": [
+    "p95 < 500ms",
+    {
+      "expr": "error_rate < 1%",
+      "abort_on_fail": true
+    },
+    "not a threshold"
+  ],
+  "scenarios": [
+    {
+      "name": "Read",
+      "weight": 1,
+      "thresholds": [
+        "iterations > 1"
+      ],
+      "steps": [
+        {
+          "name": "Items",
+          "request": {
+            "method": "GET",
+            "url": "https://api.example.com/items"
+          },
+          "thresholds": [
+            "iterations > 1",
+            {
+              "expr": "p99 < 1",
+              "delay_abort": "-1s"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

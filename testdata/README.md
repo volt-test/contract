@@ -17,7 +17,9 @@ the v1 engines read and loses nothing on a round trip.
   for a cloud run (`"header": null`, `"weights"`, empty `"report_type"`);
   `expected_types.json` has validator `expected` values of every JSON type;
   `header_shadow.json` has `"header": {}` next to `"headers"`;
-  `schema_version_number.json` declares `"schema_version": 1`.
+  `schema_version_number.json` declares `"schema_version": 1`;
+  `thresholds_ignored.json` has `thresholds` keys at every level, which
+  v1 readers ignore and the v1 path drops unread.
 
 Redactions: the presigned storage URL in `compat/constant_csv.node-0.json`
 is replaced with a placeholder URL without a query string (no credential,
