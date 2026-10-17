@@ -270,6 +270,7 @@ func TestScopeAddErrors(t *testing.T) {
 		"more passed than checks":   {Checks: ptr(1), ChecksPassed: ptr(2)},
 		"negative sum":              {TTFB: thresholds.Distribution{SumUs: -1}},
 		"negative min":              {TTFB: thresholds.Distribution{Count: 1, MinUs: -1, MaxUs: 1}},
+		"histogram above count":     {Duration: thresholds.Distribution{Count: 1, SumUs: 30, MinUs: 10, MaxUs: 20, Hist: dist(t, 10, 20).Hist}},
 	}
 	want := func(name string) error {
 		switch {
@@ -289,6 +290,43 @@ func TestScopeAddErrors(t *testing.T) {
 		if !equalScopes(s, before) {
 			t.Errorf("%s: Add changed s on error", name)
 		}
+	}
+}
+
+// Add keeps the receiver's histograms, so a caller can keep recording into
+// them: adding an empty scope must not drop an empty, pre-allocated one.
+func TestScopeAddKeepsHistogram(t *testing.T) {
+	cum := &thresholds.Scope{Duration: thresholds.Distribution{Hist: thresholds.NewHistogram()},
+		TTFB: thresholds.Distribution{Hist: thresholds.NewHistogram()}}
+	dh, th := cum.Duration.Hist, cum.TTFB.Hist
+	for _, o := range []*thresholds.Scope{
+		{}, // nothing at all
+		{Duration: thresholds.Distribution{Hist: thresholds.NewHistogram()}}, // an empty histogram
+		{Duration: dist(t, 100, 200), TTFB: dist(t, 7)},                      // values
+		{},
+	} {
+		if err := cum.Add(o); err != nil {
+			t.Fatal(err)
+		}
+		if cum.Duration.Hist != dh || cum.TTFB.Hist != th {
+			t.Fatalf("Add replaced the receiver's histogram (adding %+v)", o)
+		}
+	}
+	if cum.Duration.Hist.TotalCount() != 2 || cum.Duration.Count != 2 || cum.TTFB.Hist.TotalCount() != 1 {
+		t.Errorf("cumulative %+v", cum.Duration)
+	}
+	// The caller can keep recording into the same histogram.
+	if err := dh.RecordValue(300); err != nil || cum.Duration.Hist.TotalCount() != 3 {
+		t.Errorf("record after Add: %v", err)
+	}
+	// With no histogram on either side, none is allocated.
+	var none thresholds.Scope
+	if err := none.Add(&thresholds.Scope{Requests: 1}); err != nil || none.Duration.Hist != nil {
+		t.Errorf("Add allocated a histogram for nothing: %+v, %v", none.Duration, err)
+	}
+	// Clone and Merge still drop an empty histogram with Count 0.
+	if c := (&thresholds.Scope{Duration: thresholds.Distribution{Hist: thresholds.NewHistogram()}}).Clone(); c.Duration.Hist != nil {
+		t.Error("Clone kept an empty histogram")
 	}
 }
 
@@ -406,13 +444,17 @@ func TestMergeErrors(t *testing.T) {
 		"end before start":          {ok, node(t, time.Second, 0, thresholds.Scope{}, nil)},
 		"failed above requests":     {ok, node(t, 0, time.Second, thresholds.Scope{Requests: 1, Failed: 2}, nil)},
 		"overflow":                  {ok, node(t, 0, time.Second, thresholds.Scope{Requests: 1<<63 - 1}, nil)},
+		"histogram above count": {ok, node(t, 0, time.Second, thresholds.Scope{}, map[string]*thresholds.ScenarioScope{
+			"s": {Steps: map[string]*thresholds.Scope{"a": {Duration: thresholds.Distribution{Hist: dist(t, 5).Hist}}}},
+		})},
 	}
 	want := map[string]error{
 		"zero start": thresholds.ErrInvalidScope, "zero end": thresholds.ErrInvalidScope,
 		"histogram config": thresholds.ErrHistogramConfig, "histogram config, first": thresholds.ErrHistogramConfig,
 		"histogram config, in step": thresholds.ErrHistogramConfig, "negative counter": thresholds.ErrInvalidScope,
 		"end before start": thresholds.ErrInvalidScope, "failed above requests": thresholds.ErrInvalidScope,
-		"overflow": thresholds.ErrOverflow,
+		"overflow": thresholds.ErrOverflow, "histogram above count": thresholds.ErrInvalidScope,
+		"no snapshots": thresholds.ErrInvalidScope, "nil snapshot": thresholds.ErrInvalidScope,
 	}
 	for name, nodes := range cases {
 		m, err := thresholds.Merge(nodes...)

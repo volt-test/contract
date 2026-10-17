@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"sync"
 
 	hdrhistogram "github.com/HdrHistogram/hdrhistogram-go"
 )
@@ -57,8 +56,10 @@ func standardHistogram(h *hdrhistogram.Histogram) bool {
 		h.SignificantFigures() == HistogramSigFigs
 }
 
-// countsLen is the number of counters in a standard histogram (23552).
-var countsLen = sync.OnceValue(func() int { return len(NewHistogram().Export().Counts) })
+// countsLen is the number of counters in a histogram with the snapshot
+// configuration: (22 buckets + 1) x 1024 sub-buckets. A test checks it
+// against hdrhistogram.
+const countsLen = 23552
 
 // EncodeHistogram returns h in the base64 V2 compressed HDR encoding, the
 // form in which node results carry histograms (as a JSON string). It
@@ -79,15 +80,18 @@ func EncodeHistogram(h *hdrhistogram.Histogram) ([]byte, error) {
 
 // Limits on encoded histograms. A standard histogram has 23552 counters
 // of at most 9 bytes each after a 40-byte header (about 207 KiB inflated);
-// the compressed form is smaller still.
+// the compressed form is smaller still. The inflate limit leaves headroom
+// above that.
 const (
 	maxEncodedHistogram  = 512 << 10 // base64 text
 	maxInflatedHistogram = 256 << 10
 	histogramHeaderSize  = 40
 )
 
-// Cookies of the V2 encodings, as hdrhistogram writes them (the low
-// nibble of the second byte is masked off when reading).
+// Cookies of the V2 encodings. hdrhistogram sets bits in the high nibble
+// of the lowest-order (fourth, big-endian) byte when writing, and clears
+// that nibble (&^ 0xf0) when reading; so does DecodeHistogram, which
+// accepts any value there.
 const (
 	v2Cookie           int32 = 0x1c849303
 	v2CompressedCookie int32 = 0x1c849304
@@ -98,8 +102,12 @@ const (
 // another process: input over 512 KiB, data that inflates past 256 KiB, a
 // configuration other than the snapshot configuration and malformed
 // counters are rejected before anything large is allocated, and it never
-// panics or loops. Allocation is bounded (about 0.5 MB). Errors wrap
-// ErrMalformedHistogram or ErrHistogramConfig.
+// panics or loops. The inner header is read and checked first; the
+// payload is then read into a buffer of exactly its declared size.
+// Decoding a valid histogram allocates about 0.4-0.6 MB, and no input
+// makes it allocate more than about 1.5 MB. The normalizing offset and
+// the conversion ratio in the header are ignored, as hdrhistogram does.
+// Errors wrap ErrMalformedHistogram, ErrHistogramConfig or ErrOverflow.
 func DecodeHistogram(data []byte) (*hdrhistogram.Histogram, error) {
 	bad := func(format string, args ...any) (*hdrhistogram.Histogram, error) {
 		return nil, fmt.Errorf("%w: "+format, append([]any{ErrMalformedHistogram}, args...)...)
@@ -130,38 +138,46 @@ func DecodeHistogram(data []byte) (*hdrhistogram.Histogram, error) {
 	if err != nil {
 		return bad("not zlib data")
 	}
-	inflated, err := io.ReadAll(io.LimitReader(z, maxInflatedHistogram+1))
-	if err != nil {
-		return bad("corrupt zlib data")
-	}
-	if len(inflated) > maxInflatedHistogram {
-		return bad("inflates past %d bytes", maxInflatedHistogram)
-	}
+	defer z.Close()
 
 	// Inner header: cookie, payload length, normalizing offset, significant
-	// figures, lowest and highest trackable values, conversion ratio.
-	if len(inflated) < histogramHeaderSize {
+	// figures, lowest and highest trackable values, conversion ratio. It is
+	// checked before the payload is read.
+	var header [histogramHeaderSize]byte
+	if _, err := io.ReadFull(z, header[:]); err != nil {
 		return bad("inflated data shorter than its header")
 	}
-	if cookie := int32(binary.BigEndian.Uint32(inflated)) &^ 0xf0; cookie != v2Cookie {
+	if cookie := int32(binary.BigEndian.Uint32(header[:])) &^ 0xf0; cookie != v2Cookie {
 		return bad("not a V2 encoding inside")
 	}
-	payload := int32(binary.BigEndian.Uint32(inflated[4:]))
-	sigFigs := int32(binary.BigEndian.Uint32(inflated[12:]))
-	lowest := int64(binary.BigEndian.Uint64(inflated[16:]))
-	highest := int64(binary.BigEndian.Uint64(inflated[24:]))
+	payloadLen := int32(binary.BigEndian.Uint32(header[4:]))
+	sigFigs := int32(binary.BigEndian.Uint32(header[12:]))
+	lowest := int64(binary.BigEndian.Uint64(header[16:]))
+	highest := int64(binary.BigEndian.Uint64(header[24:]))
 	if lowest != HistogramLowestUs || highest != HistogramHighestUs || sigFigs != HistogramSigFigs {
 		return nil, ErrHistogramConfig
 	}
-	if int(payload) != len(inflated)-histogramHeaderSize {
-		return bad("payload length %d does not match the data", payload)
+	if payloadLen < 0 || int(payloadLen) > maxInflatedHistogram-histogramHeaderSize {
+		return bad("payload length %d is out of range", payloadLen)
+	}
+	payload := make([]byte, payloadLen)
+	if _, err := io.ReadFull(z, payload); err != nil {
+		return bad("payload length %d does not match the data", payloadLen)
+	}
+	// The stream must end here; reading to the end also checks the zlib
+	// checksum.
+	var extra [1]byte
+	if n, err := io.ReadFull(z, extra[:]); n > 0 {
+		return bad("payload length %d does not match the data", payloadLen)
+	} else if err != io.EOF {
+		return bad("corrupt zlib data")
 	}
 
 	// Counters: ZigZag LEB128 values; a negative one is a run of zeros.
-	counts := make([]int64, countsLen())
+	counts := make([]int64, countsLen)
 	var total int64
 	idx := 0
-	for p := inflated[histogramHeaderSize:]; len(p) > 0; {
+	for p := payload; len(p) > 0; {
 		v, k, ok := zigzag(p)
 		if !ok {
 			return bad("truncated counter")

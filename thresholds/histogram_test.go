@@ -39,8 +39,12 @@ func zz(v int64) []byte {
 
 // inner builds the inflated form: the 40-byte header and the payload.
 func inner(cookie int32, payloadLen int32, sigFigs int32, lowest, highest int64, payload []byte) []byte {
+	return innerWith(cookie, payloadLen, 1, sigFigs, lowest, highest, 1, payload)
+}
+
+func innerWith(cookie, payloadLen, offset, sigFigs int32, lowest, highest int64, ratio float64, payload []byte) []byte {
 	var b bytes.Buffer
-	for _, v := range []any{cookie, payloadLen, int32(1), sigFigs, lowest, highest, float64(1)} {
+	for _, v := range []any{cookie, payloadLen, offset, sigFigs, lowest, highest, ratio} {
 		_ = binary.Write(&b, binary.BigEndian, v)
 	}
 	b.Write(payload)
@@ -53,13 +57,15 @@ func standardInner(payload []byte) []byte {
 
 // outer compresses an inflated form and wraps it as the base64 V2
 // compressed encoding.
-func outer(inflated []byte) []byte {
+func outer(inflated []byte) []byte { return outerWith(0x1c849314, inflated) }
+
+func outerWith(cookie int32, inflated []byte) []byte {
 	var z bytes.Buffer
 	w, _ := zlib.NewWriterLevel(&z, zlib.BestCompression)
 	_, _ = w.Write(inflated)
 	_ = w.Close()
 	var b bytes.Buffer
-	_ = binary.Write(&b, binary.BigEndian, int32(0x1c849314))
+	_ = binary.Write(&b, binary.BigEndian, cookie)
 	_ = binary.Write(&b, binary.BigEndian, int32(z.Len()))
 	b.Write(z.Bytes())
 	return []byte(base64.StdEncoding.EncodeToString(b.Bytes()))
@@ -112,6 +118,32 @@ func TestHistogramCodec(t *testing.T) {
 		t.Fatal("encode edges")
 	} else if back, err := thresholds.DecodeHistogram(b); err != nil || !back.Equals(edges) {
 		t.Errorf("edges: %v", err)
+	}
+
+	// Header fields DecodeHistogram ignores, as hdrhistogram does: other
+	// bits in the masked nibble of either cookie, the normalizing offset
+	// and the conversion ratio.
+	payload := append(zz(-10), append(zz(3), zz(1)...)...)
+	want := thresholds.NewHistogram()
+	_ = want.RecordValues(10, 3)
+	_ = want.RecordValues(11, 1)
+	for name, data := range map[string][]byte{
+		"plain":             outer(standardInner(payload)),
+		"outer cookie 0x24": outerWith(0x1c849324, standardInner(payload)),
+		"outer cookie 0xf4": outerWith(0x1c8493f4, standardInner(payload)),
+		"inner cookie 0x33": outer(innerWith(0x1c849333, int32(len(payload)), 1, 3, 1, 3_600_000_000, 1, payload)),
+		"inner cookie 0x03": outer(innerWith(0x1c849303, int32(len(payload)), 1, 3, 1, 3_600_000_000, 1, payload)),
+		"offset 0":          outer(innerWith(0x1c849313, int32(len(payload)), 0, 3, 1, 3_600_000_000, 1, payload)),
+		"ratio 0.001":       outer(innerWith(0x1c849313, int32(len(payload)), 1, 3, 1, 3_600_000_000, 0.001, payload)),
+	} {
+		h, err := thresholds.DecodeHistogram(data)
+		if err != nil || !h.Equals(want) {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if lib, err := hdrhistogram.Decode(data); err != nil || !lib.Equals(h) {
+			t.Errorf("%s: hdrhistogram.Decode disagrees: %v", name, err)
+		}
 	}
 
 	if _, err := thresholds.EncodeHistogram(nil); !errors.Is(err, thresholds.ErrMalformedHistogram) {
@@ -169,6 +201,9 @@ func TestDecodeHistogramRejects(t *testing.T) {
 		{"short inner header", outer(make([]byte, 39)), thresholds.ErrMalformedHistogram},
 		{"wrong inner cookie", outer(inner(0x1c849314, 0, 3, 1, 3_600_000_000, nil)), thresholds.ErrMalformedHistogram},
 		{"payload length mismatch", outer(inner(0x1c849313, 5, 3, 1, 3_600_000_000, zz(1))), thresholds.ErrMalformedHistogram},
+		{"payload longer than declared", outer(inner(0x1c849313, 1, 3, 1, 3_600_000_000, append(zz(1), zz(1)...))), thresholds.ErrMalformedHistogram},
+		{"negative payload length", outer(inner(0x1c849313, -1, 3, 1, 3_600_000_000, nil)), thresholds.ErrMalformedHistogram},
+		{"payload length past the inflate limit", outer(inner(0x1c849313, 300<<10, 3, 1, 3_600_000_000, nil)), thresholds.ErrMalformedHistogram},
 		{"truncated counter", outer(standardInner([]byte{0x81})), thresholds.ErrMalformedHistogram},
 		{"zero run past the end", outer(standardInner(zz(-23_553))), thresholds.ErrMalformedHistogram},
 		{"zero run of MinInt64", outer(standardInner(zz(math.MinInt64))), thresholds.ErrMalformedHistogram},

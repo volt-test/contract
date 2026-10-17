@@ -71,7 +71,10 @@ func unitOf(k Kind) string {
 // every result for a scope the snapshot does not have, whatever the
 // metric. Producers therefore emit every scope of the definition, with
 // zeros when nothing happened; a present scope with no requests is a
-// measured zero. A threshold that is not Valid gives no_data.
+// measured zero. A scope that breaks the scope invariants (see the package
+// documentation; Merge and Add reject such scopes, but a snapshot built
+// directly is not checked) gives no_data for every threshold on it, and so
+// does a threshold that is not Valid.
 //
 // Values are compared in the canonical units of Threshold.Value
 // (microseconds, fractions, bytes) and converted for display only.
@@ -91,7 +94,7 @@ func Evaluate(s *Snapshot, bounds []Bound) []Result {
 		if r.Expr == "" {
 			r.Expr = th.String()
 		}
-		if sc := s.scope(b.Ref); sc != nil && th.Valid() == nil {
+		if sc := s.scope(b.Ref); sc != nil && sc.check() == nil && th.Valid() == nil {
 			if v, display, ok := measure(s, sc, th.Metric); ok {
 				actuals[i] = display
 				r.Actual = &actuals[i]

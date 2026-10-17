@@ -203,14 +203,21 @@
 //     copy.
 //   - Start is the earliest start and End the latest end.
 //
-// Every scope must satisfy Failed <= Requests and, when both are set,
-// ChecksPassed <= Checks; counters and sums must not be negative.
+// Every scope must satisfy Failed <= Requests, ChecksPassed <= Checks when
+// both are set, and Hist.TotalCount() <= Count for each distribution (a
+// producer may leave values out of a histogram, never add any); counters
+// and sums must not be negative. Merge and Add reject a scope that breaks
+// these, and Evaluate gives every threshold on it no_data.
 //
-// Merge fails on no snapshots or a nil snapshot, and with ErrInvalidScope
-// on a zero Start or End, an End before the Start, a negative counter or
-// a broken invariant; with ErrOverflow on an overflow; and with
-// ErrHistogramConfig on a histogram with another configuration. A histogram takes about 188 KB, so Merge allocates one
-// per merged distribution with values. A caller that evaluates repeatedly
-// during a run should keep cumulative scopes and update them with
-// Scope.Add rather than rebuild and merge snapshots.
+// Merge fails with ErrInvalidScope on no snapshots, a nil snapshot, a
+// zero Start or End, an End before the Start, a negative counter or a
+// broken invariant; with ErrOverflow on an overflow; and with
+// ErrHistogramConfig on a histogram with another configuration.
+//
+// A histogram takes about 188 KB, so Merge allocates one per merged
+// distribution with values. A caller that evaluates repeatedly during a
+// run should keep cumulative scopes and update them with Scope.Add rather
+// than rebuild and merge snapshots. Add keeps the receiver's histogram
+// pointers, so the caller can keep recording into them between Adds
+// (never during an Add or an Evaluate).
 package thresholds

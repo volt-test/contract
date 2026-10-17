@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	hdrhistogram "github.com/HdrHistogram/hdrhistogram-go"
+
 	"github.com/volt-test/contract/thresholds"
 )
 
@@ -477,6 +479,32 @@ func TestEvaluateIsPure(t *testing.T) {
 	}
 	if s.Scenarios != nil {
 		t.Error("Evaluate created scopes")
+	}
+}
+
+// A snapshot built directly is not checked by Merge or Add: a scope that
+// breaks the invariants gives no_data for every threshold on it, while
+// other scopes evaluate normally.
+func TestEvaluateUncheckedScopes(t *testing.T) {
+	bad := map[string]thresholds.Scope{
+		"failed above requests":  {Requests: 1, Failed: 5},
+		"passed above checks":    {Requests: 1, Checks: ptr(1), ChecksPassed: ptr(3)},
+		"negative counter":       {Requests: -1},
+		"histogram above count":  {Requests: 1, Duration: thresholds.Distribution{Count: 1, SumUs: 30, MinUs: 10, MaxUs: 20, Hist: dist(t, 10, 20).Hist}},
+		"max below min":          {Requests: 1, Duration: thresholds.Distribution{Count: 1, SumUs: 5, MinUs: 5, MaxUs: 4}},
+		"other histogram config": {Requests: 1, TTFB: thresholds.Distribution{Hist: hdrhistogram.New(1, 1_000_000, 3)}},
+	}
+	for name, sc := range bad {
+		s := &thresholds.Snapshot{Start: t0, End: t0.Add(time.Second), Test: thresholds.Scope{Requests: 10, Failed: 1},
+			Scenarios: map[string]*thresholds.ScenarioScope{"s": {Scope: sc}}}
+		for _, expr := range []string{"error_rate < 100%", "requests > 0", "rps > 0", "check_rate > 0%", "max < 1s", "failed == 0"} {
+			if r := evaluate(t, s, thresholds.Ref{Scenario: "s"}, expr); r.Status != thresholds.StatusNoData || r.Actual != nil {
+				t.Errorf("%s, %s: %+v", name, expr, r)
+			}
+		}
+		if got := actual(t, evaluate(t, s, thresholds.Ref{}, "error_rate < 50%")); got != 10 {
+			t.Errorf("%s: the valid test scope reads error_rate %v", name, got)
+		}
 	}
 }
 

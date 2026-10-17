@@ -1,7 +1,6 @@
 package thresholds
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -55,8 +54,10 @@ type Snapshot struct {
 //
 // A zero Scope has nil optional counters, so adding to one keeps them nil.
 // To sum scopes, start from a Clone of the first and Add the others.
-// Add merges o's histograms into s's in place, allocating a histogram when
-// s has none.
+// Add merges o's histograms into s's in place and keeps s's histogram
+// pointers, so a caller can keep recording into them; it allocates a
+// histogram only when s has none and o has values or a histogram with
+// Count > 0.
 func (s *Scope) Add(o *Scope) error {
 	if o == nil {
 		return nil
@@ -135,22 +136,24 @@ func histOf(d Distribution) *hdrhistogram.Histogram {
 	return d.Hist
 }
 
-// mergeHist returns the histogram of a and b combined. A side with values
-// but no histogram makes the result nil (the percentiles are unknown).
-// Otherwise the result is nil when neither side has a histogram (see
-// histOf), and a known histogram, possibly empty, when either has one:
-// a.Hist with b's values merged in, or a new histogram when a has none.
-// The rule is symmetric, so the order of the nodes does not matter.
+// mergeHist returns the histogram of a and b combined, where a is the
+// receiver of Add. A side with values but no histogram makes the result
+// nil (the percentiles are unknown). Otherwise a.Hist, when set, is kept
+// and receives b's values, even when both are empty: a caller may hold it
+// and keep recording into it. When a has no histogram, one is created
+// only if b has one (see histOf). Merge starts from Clones, which drop
+// empty histograms, so its output does not depend on the order of the
+// nodes.
 func mergeHist(a, b Distribution) *hdrhistogram.Histogram {
 	if (a.Count > 0 && a.Hist == nil) || (b.Count > 0 && b.Hist == nil) {
 		return nil
 	}
 	hb := histOf(b)
-	if histOf(a) == nil && hb == nil {
-		return nil
-	}
 	h := a.Hist
 	if h == nil {
+		if hb == nil {
+			return nil
+		}
 		h = NewHistogram()
 	}
 	if hb != nil && hb.TotalCount() > 0 {
@@ -197,6 +200,11 @@ func (s *Scope) check() error {
 		if d.Hist != nil && !standardHistogram(d.Hist) {
 			return ErrHistogramConfig
 		}
+		// A producer may leave values out of the histogram (over an hour),
+		// never add any.
+		if d.Hist != nil && d.Hist.TotalCount() > d.Count {
+			return fmt.Errorf("%w: histogram holds more values than Count", ErrInvalidScope)
+		}
 	}
 	return nil
 }
@@ -229,20 +237,20 @@ func (s *Scope) Clone() *Scope {
 // latest end, so rps over the merged snapshot is the run's wall-clock
 // throughput, not the sum of the nodes' rates.
 //
-// Merge returns an error for no snapshots or a nil snapshot. It returns
-// an error wrapping ErrInvalidScope for a zero Start or End, an End before
-// the Start, a negative counter or a broken invariant; ErrOverflow for an
+// Merge returns an error wrapping ErrInvalidScope for no snapshots, a nil
+// snapshot, a zero Start or End, an End before the Start, a negative
+// counter or a broken invariant; ErrOverflow for an
 // overflow; and ErrHistogramConfig for a histogram without the snapshot
 // configuration. Merge allocates a histogram (about 188 KB) for every
 // distribution that has values.
 func Merge(nodes ...*Snapshot) (*Snapshot, error) {
 	if len(nodes) == 0 {
-		return nil, errors.New("thresholds: merge: no snapshots")
+		return nil, fmt.Errorf("%w: merge: no snapshots", ErrInvalidScope)
 	}
 	out := &Snapshot{}
 	for i, n := range nodes {
 		if n == nil {
-			return nil, fmt.Errorf("thresholds: merge: snapshot %d is nil", i)
+			return nil, fmt.Errorf("%w: snapshot %d is nil", ErrInvalidScope, i)
 		}
 		if n.Start.IsZero() || n.End.IsZero() {
 			return nil, fmt.Errorf("%w: snapshot %d has no start or end time", ErrInvalidScope, i)

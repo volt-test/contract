@@ -499,7 +499,8 @@ func unknownMetric(name string) string {
 // ValidFor reports whether the threshold may be attached at scope k. The
 // iteration metrics (iteration_duration and its variants, iterations and
 // dropped_iterations) describe whole scenario runs, so they are available
-// on the test and on scenarios but not on steps. Errors are *ScopeError.
+// on the test and on scenarios but not on steps. It checks Valid first.
+// Errors are *ScopeError, or wrap ErrInvalidThreshold.
 func (t Threshold) ValidFor(k ScopeKind) error {
 	if err := t.Valid(); err != nil {
 		return err
@@ -516,10 +517,11 @@ func (t Threshold) ValidFor(k ScopeKind) error {
 	return fmt.Errorf("thresholds: unknown scope %s", k)
 }
 
-// Valid reports whether t is a threshold Parse could have produced: a
-// metric from the catalog, a known operator, and a finite, non-negative
-// Value that fits the metric's kind (a whole number for counts and sizes,
-// at most 1 for rates). Every threshold from Parse is valid. Evaluate
+// Valid reports whether t has the invariants every threshold from Parse
+// has: a metric from the catalog, a known operator, and a finite,
+// non-negative Value that fits the metric's kind (a whole number for
+// counts and sizes, at most 1 for rates). It is necessary, not
+// sufficient: a valid threshold need not be one Parse can produce. Evaluate
 // gives an invalid threshold no_data; callers that build or receive
 // thresholds by other means (the engine at startup, the backend before
 // re-evaluating) should call Valid up front and report the error. Errors
