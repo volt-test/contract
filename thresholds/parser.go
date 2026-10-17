@@ -1,7 +1,6 @@
 package thresholds
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -500,10 +499,11 @@ func unknownMetric(name string) string {
 // ValidFor reports whether the threshold may be attached at scope k. The
 // iteration metrics (iteration_duration and its variants, iterations and
 // dropped_iterations) describe whole scenario runs, so they are available
-// on the test and on scenarios but not on steps. Errors are *ScopeError.
+// on the test and on scenarios but not on steps. It checks Valid first.
+// Errors are *ScopeError, or wrap ErrInvalidThreshold.
 func (t Threshold) ValidFor(k ScopeKind) error {
-	if m, ok := lookupMetric(t.Metric.Name); !ok || m != t.Metric {
-		return errors.New("thresholds: the threshold has no metric from the catalog; build it with Parse")
+	if err := t.Valid(); err != nil {
+		return err
 	}
 	switch k {
 	case ScopeTest, ScopeScenario:
@@ -515,6 +515,41 @@ func (t Threshold) ValidFor(k ScopeKind) error {
 		return nil
 	}
 	return fmt.Errorf("thresholds: unknown scope %s", k)
+}
+
+// Valid reports whether t has the invariants every threshold from Parse
+// has: a metric from the catalog, a known operator, and a finite,
+// non-negative Value that fits the metric's kind (a whole number for
+// counts and sizes, at most 1 for rates). It is necessary, not
+// sufficient: a valid threshold need not be one Parse can produce. Evaluate
+// gives an invalid threshold no_data; callers that build or receive
+// thresholds by other means (the engine at startup, the backend before
+// re-evaluating) should call Valid up front and report the error. Errors
+// wrap ErrInvalidThreshold.
+func (t Threshold) Valid() error {
+	if m, ok := lookupMetric(t.Metric.Name); !ok || m != t.Metric {
+		return fmt.Errorf("%w: the metric is not from the catalog; build it with Parse", ErrInvalidThreshold)
+	}
+	switch t.Op {
+	case OpLT, OpLE, OpGT, OpGE, OpEQ:
+	default:
+		return fmt.Errorf("%w: unknown operator %s", ErrInvalidThreshold, t.Op)
+	}
+	v := t.Value
+	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+		return fmt.Errorf("%w: the value must be a finite number of at least 0", ErrInvalidThreshold)
+	}
+	switch t.Metric.Kind {
+	case KindCount, KindSize:
+		if v != math.Trunc(v) {
+			return fmt.Errorf("%w: %s takes a whole number", ErrInvalidThreshold, t.Metric.Name)
+		}
+	case KindRate:
+		if v > 1 {
+			return fmt.Errorf("%w: a rate cannot exceed 100%%", ErrInvalidThreshold)
+		}
+	}
+	return nil
 }
 
 // String returns the threshold in canonical form, such as "p95 < 500ms":

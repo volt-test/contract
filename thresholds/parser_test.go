@@ -493,3 +493,47 @@ func requireRoundTrip(t testing.TB, th thresholds.Threshold) {
 		t.Errorf("Value of %q is %v", th.Raw, th.Value)
 	}
 }
+
+func TestThresholdValid(t *testing.T) {
+	for _, name := range thresholds.Metrics() {
+		th, err := thresholds.Parse(name + " >= " + map[thresholds.Kind]string{
+			thresholds.KindDuration: "1s", thresholds.KindRate: "100%", thresholds.KindCount: "0",
+			thresholds.KindSize: "1kib", thresholds.KindThroughput: "0.5",
+		}[kindOf(name)])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := th.Valid(); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	p95, _ := thresholds.Parse("p95 < 1s")
+	rate, _ := thresholds.Parse("error_rate < 1%")
+	size, _ := thresholds.Parse("bytes_sent < 1kb")
+	bad := map[string]thresholds.Threshold{
+		"zero":            {},
+		"hand-built":      {Metric: thresholds.Metric{Name: "p95", Kind: thresholds.KindDuration}, Op: thresholds.OpLT, Value: 1},
+		"unknown metric":  {Metric: thresholds.Metric{Name: "p98", Kind: thresholds.KindDuration}, Op: thresholds.OpLT, Value: 1},
+		"zero op":         {Metric: p95.Metric, Value: 1},
+		"unknown op":      {Metric: p95.Metric, Op: thresholds.Op(6), Value: 1},
+		"NaN":             {Metric: p95.Metric, Op: thresholds.OpLT, Value: math.NaN()},
+		"+Inf":            {Metric: p95.Metric, Op: thresholds.OpLT, Value: math.Inf(1)},
+		"negative":        {Metric: p95.Metric, Op: thresholds.OpLT, Value: -1},
+		"rate above 100%": {Metric: rate.Metric, Op: thresholds.OpLT, Value: 1.5},
+		"fractional size": {Metric: size.Metric, Op: thresholds.OpLT, Value: 0.5},
+	}
+	for name, th := range bad {
+		err := th.Valid()
+		if !errors.Is(err, thresholds.ErrInvalidThreshold) {
+			t.Errorf("%s: Valid() = %v", name, err)
+			continue
+		}
+		if !strings.HasPrefix(err.Error(), "thresholds: invalid threshold: ") {
+			t.Errorf("%s: error text %q", name, err)
+		}
+		// ValidFor reports the same problem first.
+		if err := th.ValidFor(thresholds.ScopeTest); !errors.Is(err, thresholds.ErrInvalidThreshold) {
+			t.Errorf("%s: ValidFor = %v", name, err)
+		}
+	}
+}

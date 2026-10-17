@@ -1,6 +1,21 @@
 package thresholds
 
-import "testing"
+import (
+	"testing"
+
+	hdrhistogram "github.com/HdrHistogram/hdrhistogram-go"
+)
+
+// countsLen matches the counter array hdrhistogram allocates for the
+// snapshot configuration.
+func TestCountsLen(t *testing.T) {
+	if got := len(NewHistogram().Export().Counts); got != countsLen || countsLen != 23552 {
+		t.Errorf("hdrhistogram has %d counters, countsLen is %d", got, countsLen)
+	}
+	if got := len(hdrhistogram.New(HistogramLowestUs, HistogramHighestUs, HistogramSigFigs).Export().Counts); got != countsLen {
+		t.Errorf("hdrhistogram.New has %d counters", got)
+	}
+}
 
 // The == comparison and the examples in the package documentation.
 func TestEqual(t *testing.T) {

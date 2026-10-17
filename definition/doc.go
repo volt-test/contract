@@ -86,6 +86,9 @@
 // thresholds.Bound values with the scenario and step each applies to. v1
 // readers ignore thresholds, and so does Parse on the v1 path.
 //
+// Through the thresholds package, which evaluates thresholds on HDR
+// histograms, this package depends on github.com/HdrHistogram/hdrhistogram-go.
+//
 // # Load model (v2)
 //
 // Either non-empty stages, or virtual_users (at least 1) with optional
