@@ -162,15 +162,21 @@
 // 3 significant figures: HistogramLowestUs, HistogramHighestUs and
 // HistogramSigFigs, as created by NewHistogram.
 //
-// Node results carry each histogram as the output of EncodeHistogram, the
-// base64 V2 compressed HDR encoding, in a JSON string field. Put the text
-// in a string: a Go []byte field would be base64-encoded a second time by
-// encoding/json (a quirk some v1 payloads have). Read it with
-// DecodeHistogram, never hdrhistogram.Decode, on bytes from another
-// process: DecodeHistogram validates the headers and the configuration
-// before it allocates, caps the input at 512 KiB and the inflated data at
-// 256 KiB, and never panics or loops, while hdrhistogram.Decode can hang
-// or allocate without bound on a crafted header.
+// EncodeHistogram produces base64 text (the V2 compressed HDR encoding),
+// and DecodeHistogram takes that same text. How a JSON payload carries it
+// depends on the field: a JSON string field carries the text once, while
+// a Go []byte field, such as the engine's existing hdr_data and
+// summary_hdr_data fields, is base64-encoded again by encoding/json, so
+// the JSON carries it twice, and a Go reader that unmarshals into []byte
+// gets the text back. Writer and reader must agree on the field's
+// convention.
+//
+// Read histograms with DecodeHistogram, never hdrhistogram.Decode, on
+// bytes from another process: DecodeHistogram validates the headers and
+// the configuration before it allocates, caps the input at 512 KiB and
+// the inflated data at 256 KiB, and never panics or loops, while
+// hdrhistogram.Decode can hang or allocate without bound on a crafted
+// header.
 //
 // # Concurrency
 //
@@ -218,6 +224,11 @@
 // distribution with values. A caller that evaluates repeatedly during a
 // run should keep cumulative scopes and update them with Scope.Add rather
 // than rebuild and merge snapshots. Add keeps the receiver's histogram
-// pointers, so the caller can keep recording into them between Adds
-// (never during an Add or an Evaluate).
+// pointers, except that a side with values but no histogram makes the
+// result's histogram nil (the percentiles become unknown). The caller can
+// keep recording into a kept histogram between Adds, never during an Add
+// or an Evaluate, but only if it updates Count, SumUs, MinUs and MaxUs
+// with every recorded value: otherwise the histogram holds more values
+// than Count, and the next Add, Merge or Evaluate rejects the scope (or,
+// for Evaluate, gives its thresholds no_data).
 package thresholds

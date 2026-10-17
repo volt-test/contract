@@ -55,7 +55,11 @@ type Snapshot struct {
 // A zero Scope has nil optional counters, so adding to one keeps them nil.
 // To sum scopes, start from a Clone of the first and Add the others.
 // Add merges o's histograms into s's in place and keeps s's histogram
-// pointers, so a caller can keep recording into them; it allocates a
+// pointers, with one exception: when either side of a distribution has
+// values but no histogram (Count > 0, Hist nil), the percentiles become
+// unknown and the result's Hist is nil. Otherwise a caller can keep
+// recording into s's histograms, provided it keeps Count, SumUs, MinUs
+// and MaxUs in step (see the package documentation). Add allocates a
 // histogram only when s has none and o has values or a histogram with
 // Count > 0.
 func (s *Scope) Add(o *Scope) error {

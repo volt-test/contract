@@ -62,8 +62,9 @@ func standardHistogram(h *hdrhistogram.Histogram) bool {
 const countsLen = 23552
 
 // EncodeHistogram returns h in the base64 V2 compressed HDR encoding, the
-// form in which node results carry histograms (as a JSON string). It
-// refuses a histogram without the snapshot configuration.
+// text form in which node results carry histograms (see the package
+// documentation for how JSON fields carry it). It refuses a histogram
+// without the snapshot configuration.
 func EncodeHistogram(h *hdrhistogram.Histogram) ([]byte, error) {
 	if h == nil {
 		return nil, fmt.Errorf("%w: nil histogram", ErrMalformedHistogram)
