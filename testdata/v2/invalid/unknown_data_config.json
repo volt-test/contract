@@ -1,0 +1,121 @@
+{
+  "schema_version": "2.0",
+  "name": "Full constant load",
+  "description": "Every v2 field with a constant load profile",
+  "virtual_users": 50,
+  "duration": "2m",
+  "ramp_up": "15s",
+  "http_timeout": "10s",
+  "http_debug": true,
+  "target": {
+    "url": "https://shop.example.com",
+    "idle_timeout": "30s",
+    "base_url": "https://shop.example.com/api/"
+  },
+  "region_config": [
+    {
+      "region": "us-east",
+      "weight": 70
+    },
+    {
+      "region": "eu-west",
+      "weight": 30
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "Shopper",
+      "description": "Logs in with CSV users and checks out",
+      "weight": 80,
+      "think_time": "1s",
+      "auto_handle_cookies": true,
+      "data_config": {
+        "data_source": "users.csv",
+        "data_content": "ZW1haWwscGFzc3dvcmQKYUBleGFtcGxlLmNvbSxleGFtcGxlLXBhc3N3b3JkCg==",
+        "data_format": "csv",
+        "has_header": true,
+        "mode": "unique",
+        "delimiter": ";"
+      },
+      "steps": [
+        {
+          "name": "Login form",
+          "request": {
+            "method": "GET",
+            "url": "/forms/login",
+            "headers": {
+              "Accept": "text/html"
+            }
+          },
+          "extract": [
+            {
+              "variable_name": "csrf",
+              "selector": "input[name=_token]",
+              "attribute": "value",
+              "type": "html"
+            },
+            {
+              "variable_name": "session",
+              "selector": "session",
+              "type": "cookie"
+            },
+            {
+              "variable_name": "request_id",
+              "selector": "X-Request-Id",
+              "type": "header"
+            }
+          ],
+          "think_time": "500ms"
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "url": "/login",
+            "body": "{\"email\":\"${email}\",\"password\":\"${password}\",\"_token\":\"${csrf}\"}",
+            "headers": {
+              "Content-Type": "application/json"
+            }
+          },
+          "extract": [
+            {
+              "variable_name": "token",
+              "selector": "$.data.token",
+              "type": "json"
+            },
+            {
+              "variable_name": "user_id",
+              "selector": "\"id\":(\\d+)",
+              "type": "regex"
+            }
+          ]
+        },
+        {
+          "name": "Checkout",
+          "request": {
+            "method": "POST",
+            "url": "https://checkout.example.com/orders?user=${user_id}",
+            "body": "{}",
+            "headers": {
+              "Authorization": "Bearer ${token}",
+              "Content-Type": "application/json"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Browser",
+      "weight": 20,
+      "steps": [
+        {
+          "name": "Products",
+          "request": {
+            "method": "GET",
+            "url": "${cdn}/products.json"
+          }
+        }
+      ]
+    }
+  ]
+}

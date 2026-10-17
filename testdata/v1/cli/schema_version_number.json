@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "name": "Numeric schema_version",
+  "virtual_users": 1,
+  "duration": "5s",
+  "target": {
+    "url": "https://api.example.com",
+    "idle_timeout": "1m"
+  },
+  "scenarios": [
+    {
+      "name": "One",
+      "steps": [
+        {
+          "name": "Get",
+          "request": {
+            "method": "GET",
+            "url": "https://api.example.com/"
+          }
+        }
+      ]
+    }
+  ]
+}

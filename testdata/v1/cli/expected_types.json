@@ -1,0 +1,34 @@
+{
+  "name": "Validator expected values",
+  "virtual_users": 1,
+  "duration": "5s",
+  "target": {
+    "url": "https://api.example.com",
+    "idle_timeout": "30s"
+  },
+  "scenarios": [
+    {
+      "name": "Checks",
+      "weight": 1,
+      "steps": [
+        {
+          "name": "Every JSON type",
+          "request": {
+            "method": "GET",
+            "url": "https://api.example.com/status"
+          },
+          "validate": [
+            {"name": "number", "type": "status_code", "expected": 200},
+            {"name": "fraction", "type": "json", "selector": "$.ratio", "expected": 0.25},
+            {"name": "string", "type": "header", "selector": "Content-Type", "expected": "application/json"},
+            {"name": "bool", "type": "json", "selector": "$.ok", "expected": true},
+            {"name": "false", "type": "json", "selector": "$.failed", "expected": false},
+            {"name": "null", "type": "json", "selector": "$.error", "expected": null},
+            {"name": "object", "type": "json", "selector": "$.meta", "expected": {"page": 1, "tags": ["a"]}},
+            {"name": "array", "type": "json", "selector": "$.ids", "expected": [1, "two", true]}
+          ]
+        }
+      ]
+    }
+  ]
+}

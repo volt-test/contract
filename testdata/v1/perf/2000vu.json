@@ -1,0 +1,53 @@
+{
+  "name": "perf 2000 VUs",
+  "description": "Bounded load: 100ms think time per step keeps the offered rate well under the machine's ceiling, so RPS is pinned by the config and CPU seconds measure the engine's per-request cost.",
+  "virtual_users": 2000,
+  "duration": "30s",
+  "ramp_up": "5s",
+  "http_timeout": "10s",
+  "target": {
+    "url": "http://127.0.0.1:8086",
+    "idle_timeout": "30s"
+  },
+  "scenarios": [
+    {
+      "name": "get",
+      "description": "",
+      "weight": 100,
+      "think_time": "",
+      "auto_handle_cookies": false,
+      "data_config": {
+        "data_source": "",
+        "data_format": "",
+        "has_header": false,
+        "mode": ""
+      },
+      "steps": [
+        {
+          "name": "GET /get",
+          "request": {
+            "method": "GET",
+            "url": "http://127.0.0.1:8086/get",
+            "body": "",
+            "header": {}
+          },
+          "extract": [],
+          "validate": [
+            {
+              "name": "ok",
+              "selector": "",
+              "expected": 200,
+              "type": "status_code"
+            }
+          ],
+          "think_time": "100ms"
+        }
+      ]
+    }
+  ],
+  "weights": [
+    100
+  ],
+  "http_debug": false,
+  "report_type": "json"
+}

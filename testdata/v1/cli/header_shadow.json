@@ -1,0 +1,48 @@
+{
+  "schema_version": "1",
+  "name": "Empty header next to headers",
+  "virtual_users": 2,
+  "duration": "5s",
+  "target": {
+    "url": "https://api.example.com"
+  },
+  "scenarios": [
+    {
+      "name": "Shadow",
+      "weight": 1,
+      "steps": [
+        {
+          "name": "Empty header map",
+          "request": {
+            "method": "GET",
+            "url": "https://api.example.com/a",
+            "header": {},
+            "headers": {
+              "Accept": "application/json"
+            }
+          }
+        },
+        {
+          "name": "Both maps set",
+          "request": {
+            "method": "GET",
+            "url": "${host}/b",
+            "header": {
+              "X-Old": "1"
+            },
+            "headers": {
+              "X-New": "2"
+            }
+          },
+          "extract": [
+            {
+              "variable_name": "id",
+              "selector": "\"id\":(\\d+)",
+              "type": "regex"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

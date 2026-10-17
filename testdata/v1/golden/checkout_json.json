@@ -1,0 +1,174 @@
+{
+  "name": "golden checkout",
+  "description": "",
+  "virtual_users": 20,
+  "duration": "10s",
+  "ramp_up": "2s",
+  "http_timeout": "10s",
+  "target": {
+    "url": "http://localhost:8085",
+    "idle_timeout": "30s"
+  },
+  "scenarios": [
+    {
+      "name": "Shopper",
+      "description": "",
+      "weight": 70,
+      "think_time": "",
+      "auto_handle_cookies": false,
+      "data_config": {
+        "data_source": "",
+        "data_format": "",
+        "has_header": false,
+        "mode": ""
+      },
+      "steps": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "url": "http://localhost:8085/api/login",
+            "body": "{\"email\":\"user@example.com\",\"password\":\"example-password\"}",
+            "header": {
+              "Content-Type": "application/json"
+            }
+          },
+          "extract": [
+            {
+              "variable_name": "token",
+              "selector": "$.data.token",
+              "attribute": "",
+              "type": "json"
+            }
+          ],
+          "validate": [
+            {
+              "name": "logged in",
+              "selector": "",
+              "expected": 200,
+              "type": "status_code"
+            }
+          ],
+          "think_time": ""
+        },
+        {
+          "name": "List products",
+          "request": {
+            "method": "GET",
+            "url": "http://localhost:8085/api/products?page=1",
+            "body": "",
+            "header": {}
+          },
+          "extract": [
+            {
+              "variable_name": "product_id",
+              "selector": "$.data[0].id",
+              "attribute": "",
+              "type": "json"
+            }
+          ],
+          "validate": [
+            {
+              "name": "listed",
+              "selector": "",
+              "expected": 200,
+              "type": "status_code"
+            }
+          ],
+          "think_time": ""
+        },
+        {
+          "name": "Add to cart",
+          "request": {
+            "method": "POST",
+            "url": "http://localhost:8085/api/cart",
+            "body": "{\"product_id\": ${product_id}, \"quantity\": 1}",
+            "header": {
+              "Authorization": "Bearer ${token}",
+              "Content-Type": "application/json"
+            }
+          },
+          "extract": [
+            {
+              "variable_name": "cart_id",
+              "selector": "$.data.cart_id",
+              "attribute": "",
+              "type": "json"
+            }
+          ],
+          "validate": [
+            {
+              "name": "cart",
+              "selector": "",
+              "expected": 201,
+              "type": "status_code"
+            }
+          ],
+          "think_time": ""
+        },
+        {
+          "name": "Checkout",
+          "request": {
+            "method": "POST",
+            "url": "http://localhost:8085/api/checkout",
+            "body": "{\"cart_id\": \"${cart_id}\"}",
+            "header": {
+              "Authorization": "Bearer ${token}",
+              "Content-Type": "application/json"
+            }
+          },
+          "extract": [],
+          "validate": [
+            {
+              "name": "order",
+              "selector": "",
+              "expected": 200,
+              "type": "status_code"
+            }
+          ],
+          "think_time": ""
+        }
+      ]
+    },
+    {
+      "name": "Browser",
+      "description": "",
+      "weight": 30,
+      "think_time": "500ms",
+      "auto_handle_cookies": false,
+      "data_config": {
+        "data_source": "",
+        "data_format": "",
+        "has_header": false,
+        "mode": ""
+      },
+      "steps": [
+        {
+          "name": "Products",
+          "request": {
+            "method": "GET",
+            "url": "http://localhost:8085/api/products?page=2",
+            "body": "",
+            "header": {}
+          },
+          "extract": [],
+          "validate": [
+            {
+              "name": "listed",
+              "selector": "",
+              "expected": 200,
+              "type": "status_code"
+            }
+          ],
+          "think_time": ""
+        }
+      ]
+    }
+  ],
+  "weights": [
+    70,
+    30
+  ],
+  "http_debug": false,
+  "report_type": "json"
+}

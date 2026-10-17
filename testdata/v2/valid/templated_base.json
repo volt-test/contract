@@ -1,0 +1,37 @@
+{
+  "schema_version": "2.0",
+  "name": "Templated base URL",
+  "virtual_users": 5,
+  "duration": "30s",
+  "target": {
+    "base_url": "${base_url}"
+  },
+  "scenarios": [
+    {
+      "name": "Relative",
+      "steps": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "url": "/health"
+          }
+        },
+        {
+          "name": "Item",
+          "request": {
+            "method": "GET",
+            "url": "/items/${id}?expand=${field}"
+          }
+        },
+        {
+          "name": "Absolute templated host",
+          "request": {
+            "method": "GET",
+            "url": "https://${host}/status"
+          }
+        }
+      ]
+    }
+  ]
+}

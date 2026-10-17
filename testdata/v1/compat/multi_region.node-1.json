@@ -1,0 +1,47 @@
+{
+  "name": "v1 compat: multi region",
+  "description": "v1 compatibility fixture",
+  "virtual_users": 10,
+  "duration": "20s",
+  "ramp_up": "2s",
+  "target": {
+    "url": "http://demo-target:8080"
+  },
+  "scenarios": [
+    {
+      "name": "Browse",
+      "weight": 100,
+      "steps": [
+        {
+          "name": "List products",
+          "request": {
+            "method": "GET",
+            "url": "http://demo-target:8080/api/products?page=1"
+          },
+          "validate": [
+            {
+              "name": "listed",
+              "type": "status_code",
+              "expected": 200
+            }
+          ]
+        },
+        {
+          "name": "Product",
+          "request": {
+            "method": "GET",
+            "url": "http://demo-target:8080/api/products/2"
+          },
+          "validate": [
+            {
+              "name": "found",
+              "type": "status_code",
+              "expected": 200
+            }
+          ]
+        }
+      ],
+      "data_config": {}
+    }
+  ]
+}
