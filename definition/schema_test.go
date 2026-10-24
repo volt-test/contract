@@ -46,6 +46,10 @@ func generateSchema(t *testing.T) []byte {
 				return &jsonschema.Schema{Type: "string", Enum: v2}
 			case thresholdType:
 				return &jsonschema.Schema{Ref: "#/$defs/Threshold"}
+			case reflect.TypeOf(definition.Scalar{}):
+				return &jsonschema.Schema{AnyOf: []*jsonschema.Schema{
+					{Type: "string"}, {Type: "number"}, {Type: "boolean"},
+				}}
 			}
 			return nil
 		},
@@ -71,6 +75,7 @@ func generateSchema(t *testing.T) []byte {
 		"Step":         "One HTTP request in a scenario.",
 		"Request":      "An HTTP request. The URL, body and header values may contain ${variable} references.",
 		"Extract":      "A value to capture from the response.",
+		"Check":        "An assertion on the response: a type, a selector where the type needs one, and exactly one operator.",
 		"Threshold":    "A pass/fail rule: an expression such as \"p95 < 500ms\", or an object with the expression and abort settings.",
 	}
 	for name, def := range s.Definitions {
@@ -98,12 +103,74 @@ func generateSchema(t *testing.T) []byte {
 		{Required: []string{"data_source"}},
 		{Required: []string{"data_content"}},
 	}
+	checkSchemaRules(t, s)
 
 	b, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}
 	return append(b, '\n')
+}
+
+// checkSchemaRules adds the check, required-extractor and expected_statuses rules
+// that a JSON Schema can state. Every optional key reads its zero value
+// ("" or []) as absent, so no optional key gets a pattern, minLength or
+// minItems, and enums also accept "". The rules Parse alone applies (one
+// operator per check, which operators and selectors a type takes, value
+// kinds, regular expressions, comparisons, unique labels) are listed in
+// knownSchemaLooser.
+func checkSchemaRules(t *testing.T, s *jsonschema.Schema) {
+	t.Helper()
+	prop := func(def *jsonschema.Schema, name string) *jsonschema.Schema {
+		p, ok := def.Properties.Get(name)
+		if !ok {
+			t.Fatalf("schema has no property %s", name)
+		}
+		return p
+	}
+	zero, two := uint64(0), uint64(2)
+	// An enum that also takes "" (absent), keeping the string type.
+	optionalEnum := func(p *jsonschema.Schema, values []string) {
+		enum := make([]any, len(values))
+		for i, v := range values {
+			enum[i] = v
+		}
+		p.AnyOf = []*jsonschema.Schema{{Enum: enum}, {MaxLength: &zero}}
+	}
+	// HTTP status codes, on the items of a list.
+	statusCodes := func(p *jsonschema.Schema) {
+		if p.Items == nil {
+			t.Fatal("status code list has no items schema")
+		}
+		p.Items.Minimum, p.Items.Maximum = json.Number("100"), json.Number("599")
+	}
+
+	check := s.Definitions["Check"]
+	optionalEnum(prop(check, "on_fail"), definition.FailModesForTest)
+	optionalEnum(prop(check, "is"), definition.JSONKindsForTest)
+	for _, k := range []string{"in", "not_in", "between"} {
+		statusCodes(prop(check, k))
+	}
+	prop(check, "between").AnyOf = []*jsonschema.Schema{{MaxItems: &zero}, {MinItems: &two, MaxItems: &two}}
+	for _, k := range []string{"exists", "missing", "empty"} {
+		prop(check, k).Const = true
+	}
+	statusCodes(prop(s, "expected_statuses"))
+
+	// A non-empty on_fail on an extractor needs required: true, as in
+	// Parse, which reads an empty one as absent.
+	extract := s.Definitions["Extract"]
+	optionalEnum(prop(extract, "on_fail"), definition.FailModesForTest)
+	emptyOnFail := jsonschema.NewProperties()
+	emptyOnFail.Set("on_fail", &jsonschema.Schema{MaxLength: &zero})
+	needRequired := jsonschema.NewProperties()
+	needRequired.Set("required", &jsonschema.Schema{Const: true})
+	extract.DependentSchemas = map[string]*jsonschema.Schema{
+		"on_fail": {AnyOf: []*jsonschema.Schema{
+			{Properties: emptyOnFail},
+			{Required: []string{"required"}, Properties: needRequired},
+		}},
+	}
 }
 
 // thresholdSchema describes a threshold: the expression string, or the
@@ -208,6 +275,24 @@ var knownSchemaLooser = map[string]string{
 	"structure_threshold_bad_expr.json":        "threshold expressions are plain strings in the schema",
 	"structure_threshold_step_iterations.json": "the schema does not know which metrics a step allows",
 	"structure_threshold_negative_delay.json":  "durations are plain strings in the schema",
+
+	"structure_check_no_operator.json":                "exactly one operator per check, counting only non-empty keys",
+	"structure_check_two_operators.json":              "exactly one operator per check, counting only non-empty keys",
+	"structure_check_wrong_operator.json":             "the schema does not know which operators a check type takes",
+	"structure_check_missing_selector.json":           "the schema does not know which check types need a selector",
+	"structure_check_blank_selector.json":             "the schema does not know which check types need a selector",
+	"structure_check_selector_not_applicable.json":    "the schema does not know which check types take no selector",
+	"structure_check_header_number_equals.json":       "equals and contains take any scalar in the schema; the kind depends on the check type",
+	"structure_check_empty_contains.json":             "an empty contains is valid for json; the schema does not know the check type",
+	"structure_check_bad_regex.json":                  "regular expressions are plain strings in the schema",
+	"structure_check_bad_comparison.json":             "count, size and duration comparisons are plain strings in the schema",
+	"structure_check_between_reversed.json":           "between [low, high] needs low <= high",
+	"structure_check_duplicate_label.json":            "check labels must be unique in a step",
+	"structure_check_duplicate_name.json":             "check labels must be unique in a step",
+	"structure_check_header_label_collision.json":     "check labels must be unique in a step; header labels omit the value",
+	"structure_check_label_cut_collision.json":        "check labels must be unique in a step, after the cut to 128 bytes",
+	"structure_check_duplicate_required_extract.json": "a required extractor's label, extract <variable_name>, must be unique in a step",
+	"type_check_equals_out_of_range.json":             "JSON Schema numbers have no range; Parse rejects equals and contains outside float64 range",
 }
 
 // TestSchemaAgreesWithParse checks that the schema and Parse agree on
@@ -381,6 +466,123 @@ func TestSchemaShape(t *testing.T) {
 	}
 	if got, want := enum("DataConfig", "data_format"), sorted(definition.DataFormatsForTest); !reflect.DeepEqual(got, want) {
 		t.Errorf("schema data formats %q != Parse %q", got, want)
+	}
+	if got, want := enum("Check", "type"), sorted(definition.CheckTypesForTest); !reflect.DeepEqual(got, want) {
+		t.Errorf("schema check types %q != Parse %q", got, want)
+	}
+	// Optional enums also take "" (absent): anyOf [{enum}, {maxLength: 0}].
+	optionalEnum := func(def, prop string) []string {
+		p := defs[def].(map[string]any)["properties"].(map[string]any)[prop].(map[string]any)
+		if p["type"] != "string" {
+			t.Errorf("$defs.%s.%s type = %v, want string", def, prop, p["type"])
+		}
+		branches, _ := p["anyOf"].([]any)
+		if len(branches) != 2 || !reflect.DeepEqual(branches[1], map[string]any{"maxLength": 0.0}) {
+			t.Errorf("$defs.%s.%s anyOf = %v, want [{enum}, {maxLength: 0}]", def, prop, p["anyOf"])
+			return nil
+		}
+		var out []string
+		for _, v := range branches[0].(map[string]any)["enum"].([]any) {
+			out = append(out, v.(string))
+		}
+		sort.Strings(out)
+		return out
+	}
+	if got, want := optionalEnum("Check", "on_fail"), sorted(definition.FailModesForTest); !reflect.DeepEqual(got, want) {
+		t.Errorf("schema check on_fail %q != Parse %q", got, want)
+	}
+	if got, want := optionalEnum("Check", "is"), sorted(definition.JSONKindsForTest); !reflect.DeepEqual(got, want) {
+		t.Errorf("schema check is %q != Parse %q", got, want)
+	}
+	if got, want := optionalEnum("Extract", "on_fail"), sorted(definition.FailModesForTest); !reflect.DeepEqual(got, want) {
+		t.Errorf("schema extract on_fail %q != Parse %q", got, want)
+	}
+
+	checkShape(t, props, defs)
+}
+
+// checkShape pins the schema of checks, required extractors and
+// expected_statuses.
+func checkShape(t *testing.T, props, defs map[string]any) {
+	t.Helper()
+	obj := func(v any) map[string]any { m, _ := v.(map[string]any); return m }
+	check := obj(defs["Check"])
+	cp := obj(check["properties"])
+	var keys []string
+	for k := range cp {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	want := []string{"between", "contains", "count", "duration", "empty", "equals", "exists", "in", "is", "matches",
+		"missing", "name", "not_contains", "not_in", "on_fail", "selector", "size", "type"}
+	if !reflect.DeepEqual(keys, want) {
+		t.Errorf("check keys = %q, want %q", keys, want)
+	}
+	if !reflect.DeepEqual(check["required"], []any{"type"}) {
+		t.Errorf("check required = %v, want only type", check["required"])
+	}
+	// Optional keys read "" and [] as absent, so none may demand content.
+	for k, v := range cp {
+		for _, rule := range []string{"pattern", "minLength", "minItems"} {
+			if _, ok := obj(v)[rule]; ok {
+				t.Errorf("check %s has %s; a zero value must stay valid", k, rule)
+			}
+		}
+	}
+	for _, k := range []string{"exists", "missing", "empty"} {
+		if p := obj(cp[k]); p["type"] != "boolean" || p["const"] != true {
+			t.Errorf("check %s = %v, want boolean const true", k, p)
+		}
+	}
+	for _, k := range []string{"equals", "contains"} {
+		var kinds []string
+		branches, _ := obj(cp[k])["anyOf"].([]any)
+		for _, b := range branches {
+			kinds = append(kinds, obj(b)["type"].(string))
+		}
+		if want := []string{"string", "number", "boolean"}; !reflect.DeepEqual(kinds, want) {
+			t.Errorf("check %s kinds = %q, want %q", k, kinds, want)
+		}
+	}
+	codes := map[string]map[string]any{"expected_statuses": obj(props["expected_statuses"])}
+	for _, k := range []string{"in", "not_in", "between"} {
+		codes[k] = obj(cp[k])
+	}
+	for k, p := range codes {
+		items := obj(p["items"])
+		if p["type"] != "array" || items["type"] != "integer" || items["minimum"] != 100.0 || items["maximum"] != 599.0 {
+			t.Errorf("%s = %v, want an array of integers from 100 to 599", k, p)
+		}
+		if _, ok := p["minimum"]; ok {
+			t.Errorf("%s has minimum on the array, not on its items", k)
+		}
+		if _, ok := p["minItems"]; ok {
+			t.Errorf("%s has minItems; [] must stay valid", k)
+		}
+	}
+	wantBetween := []any{map[string]any{"maxItems": 0.0}, map[string]any{"minItems": 2.0, "maxItems": 2.0}}
+	if got := obj(cp["between"])["anyOf"]; !reflect.DeepEqual(got, wantBetween) {
+		t.Errorf("between anyOf = %v, want %v", got, wantBetween)
+	}
+
+	extract := obj(defs["Extract"])
+	ep := obj(extract["properties"])
+	if p := obj(ep["required"]); p["type"] != "boolean" {
+		t.Errorf("extract required = %v", p)
+	}
+	if contains(extract["required"], "required") || contains(extract["required"], "on_fail") {
+		t.Errorf("extract required keys = %v; required and on_fail are optional", extract["required"])
+	}
+	wantDep := map[string]any{"anyOf": []any{
+		map[string]any{"properties": map[string]any{"on_fail": map[string]any{"maxLength": 0.0}}},
+		map[string]any{"required": []any{"required"}, "properties": map[string]any{"required": map[string]any{"const": true}}},
+	}}
+	if got := obj(obj(extract["dependentSchemas"])["on_fail"]); !reflect.DeepEqual(got, wantDep) {
+		t.Errorf("extract dependentSchemas.on_fail = %v, want %v", got, wantDep)
+	}
+	steps := obj(obj(defs["Step"])["properties"])
+	if items := obj(obj(steps["checks"])["items"]); items["$ref"] != "#/$defs/Check" {
+		t.Errorf("step checks items = %v", items)
 	}
 }
 

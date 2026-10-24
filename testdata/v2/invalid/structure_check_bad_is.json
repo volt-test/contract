@@ -1,0 +1,26 @@
+{
+  "schema_version": "2.0",
+  "name": "Invalid check",
+  "virtual_users": 1,
+  "scenarios": [
+    {
+      "name": "S",
+      "steps": [
+        {
+          "name": "A",
+          "request": {
+            "method": "GET",
+            "url": "https://example.com/"
+          },
+          "checks": [
+            {
+              "type": "json",
+              "selector": "$.id",
+              "is": "integer"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

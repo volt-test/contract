@@ -19,8 +19,11 @@ func TestFixturesCarryNoSecrets(t *testing.T) {
 			if bytes.Contains(bytes.ToLower(raw), []byte("secret")) {
 				t.Errorf("%s contains \"secret\"", filepath.ToSlash(f))
 			}
+			// UseNumber: invalid fixtures may hold numbers out of float64 range.
+			dec := json.NewDecoder(bytes.NewReader(raw))
+			dec.UseNumber()
 			var doc any
-			if err := json.Unmarshal(raw, &doc); err != nil {
+			if err := dec.Decode(&doc); err != nil {
 				t.Fatalf("%s: %v", f, err)
 			}
 			for _, content := range dataContents(doc) {

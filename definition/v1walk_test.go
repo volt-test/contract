@@ -1,6 +1,7 @@
 package definition
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -81,10 +82,14 @@ var v1ReadSet = map[string]string{
 	"scenarios[].steps[].request.headers": "loose",
 	"scenarios[].data_config.data_download_url": "loose",
 
-	"target.base_url":                "v2",
-	"thresholds":                     "v2",
-	"scenarios[].thresholds":         "v2",
-	"scenarios[].steps[].thresholds": "v2",
+	"target.base_url":                        "v2",
+	"thresholds":                             "v2",
+	"scenarios[].thresholds":                 "v2",
+	"scenarios[].steps[].thresholds":         "v2",
+	"scenarios[].steps[].checks":             "v2",
+	"scenarios[].steps[].extract[].required": "v2",
+	"scenarios[].steps[].extract[].on_fail":  "v2",
+	"expected_statuses":                      "v2",
 }
 
 type classified struct {
@@ -415,9 +420,16 @@ type mirrorScenario struct {
 type mirrorStep struct {
 	Name      string            `json:"name"`
 	Request   Request           `json:"request"`
-	Extract   []Extract         `json:"extract"`
+	Extract   []mirrorExtract   `json:"extract"`
 	Validate  []LegacyValidator `json:"validate"`
 	ThinkTime string            `json:"think_time"`
+}
+
+type mirrorExtract struct {
+	VariableName string `json:"variable_name"`
+	Selector     string `json:"selector"`
+	Attribute    string `json:"attribute"`
+	Type         string `json:"type"`
 }
 
 type mirrorDataConfig struct {
@@ -450,8 +462,15 @@ func toMirror(d *Definition) mirrorDefinition {
 			ms.Steps = make([]mirrorStep, len(sc.Steps))
 		}
 		for j, st := range sc.Steps {
-			ms.Steps[j] = mirrorStep{Name: st.Name, Request: st.Request, Extract: st.Extract,
+			ms.Steps[j] = mirrorStep{Name: st.Name, Request: st.Request,
 				Validate: st.Validate, ThinkTime: st.ThinkTime}
+			if st.Extract != nil {
+				ms.Steps[j].Extract = make([]mirrorExtract, len(st.Extract))
+			}
+			for k, ex := range st.Extract {
+				ms.Steps[j].Extract[k] = mirrorExtract{VariableName: ex.VariableName, Selector: ex.Selector,
+					Attribute: ex.Attribute, Type: ex.Type}
+			}
 		}
 		if dc := sc.DataConfig; dc != nil {
 			ms.DataConfig = mirrorDataConfig(*dc)
@@ -566,5 +585,90 @@ func clearV2Only(v reflect.Value) {
 			}
 			clearV2Only(v.Field(i))
 		}
+	}
+}
+
+// withoutV2OnlyKeys returns doc without the keys v1ReadSet classifies as
+// v2, matched case-insensitively as encoding/json matches them. It
+// re-encodes doc, so use it only on documents without duplicate keys.
+func withoutV2OnlyKeys(t *testing.T, doc []byte) []byte {
+	t.Helper()
+	dec := json.NewDecoder(bytes.NewReader(doc))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		t.Fatal(err)
+	}
+	var drop func(path string, v any)
+	drop = func(path string, v any) {
+		switch x := v.(type) {
+		case map[string]any:
+			for k, child := range x {
+				p := strings.ToLower(k)
+				if path != "" {
+					p = path + "." + p
+				}
+				if v1ReadSet[p] == "v2" {
+					delete(x, k)
+					continue
+				}
+				drop(p, child)
+			}
+		case []any:
+			for _, child := range x {
+				drop(path+"[]", child)
+			}
+		}
+	}
+	drop("", v)
+	out, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// TestV1DropsCheckKeys checks that checks_ignored.json, a v1 definition
+// carrying the v2 check keys (some with values v2 rejects), parses exactly
+// as it does without them. TestV1IgnoresChecks covers keys of the wrong
+// JSON type.
+func TestV1DropsCheckKeys(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "testdata", "v1", "cli", "checks_ignored.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stripped := withoutV2OnlyKeys(t, raw)
+	if bytes.Equal(stripped, raw) || bytes.Contains(stripped, []byte(`"checks"`)) ||
+		bytes.Contains(stripped, []byte(`"required"`)) || bytes.Contains(stripped, []byte(`"expected_statuses"`)) {
+		t.Fatalf("the fixture's v2 keys were not all removed: %s", stripped)
+	}
+	want, err := Parse(stripped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.IsV1() || len(got.V1TypeProblems) != 0 {
+		t.Errorf("IsV1 %v, V1TypeProblems %v", got.IsV1(), got.V1TypeProblems)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("v1 with check keys:\n got %+v\nwant %+v", got, want)
+	}
+	for _, sc := range got.Scenarios {
+		for _, st := range sc.Steps {
+			if st.Checks != nil {
+				t.Errorf("step %s kept checks", st.Name)
+			}
+			for _, ex := range st.Extract {
+				if ex.Required || ex.OnFail != "" {
+					t.Errorf("extractor %s kept required/on_fail", ex.VariableName)
+				}
+			}
+		}
+	}
+	if got.ExpectedStatuses != nil {
+		t.Error("expected_statuses kept")
 	}
 }

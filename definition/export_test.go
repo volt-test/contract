@@ -5,6 +5,9 @@ var (
 	ExtractTypesForTest     = extractTypes
 	DataFormatsForTest      = dataFormats
 	DataModesForTest        = dataModes
+	CheckTypesForTest       = checkTypes
+	FailModesForTest        = failModes
+	JSONKindsForTest        = jsonKinds
 	MinEngineReleaseForTest = minEngineRelease
 )
 

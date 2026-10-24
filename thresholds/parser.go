@@ -77,18 +77,27 @@ type Threshold struct {
 }
 
 // ParseError reports an expression that does not follow the grammar or
-// does not fit its metric.
+// does not fit its metric, or a comparison that does not follow the
+// grammar or does not fit its kind.
 type ParseError struct {
-	// Expr is the expression as given to Parse.
+	// Expr is the expression as given to Parse, or the comparison as given
+	// to ParseComparison.
 	Expr string
 	// Pos is the byte offset in Expr where the problem starts.
 	Pos int
 	// Msg describes the problem, often with a hint.
 	Msg string
+
+	// comparison is set for errors from ParseComparison.
+	comparison bool
 }
 
 func (e *ParseError) Error() string {
-	return fmt.Sprintf("thresholds: invalid threshold %s: %s (at offset %d)", quoteShort(e.Expr), e.Msg, e.Pos)
+	what := "threshold"
+	if e.comparison {
+		what = "comparison"
+	}
+	return fmt.Sprintf("thresholds: invalid %s %s: %s (at offset %d)", what, quoteShort(e.Expr), e.Msg, e.Pos)
 }
 
 // ScopeError reports a metric used at a scope where it is not available.
@@ -137,13 +146,67 @@ func Parse(expr string) (Threshold, error) {
 	return p.parse()
 }
 
+// Comparison is a parsed comparison: an operator and a value with no
+// metric, such as "< 500ms", for a value measured elsewhere. It shares the
+// threshold grammar, units and == rule; see the package documentation.
+type Comparison struct {
+	// Raw is the comparison as written.
+	Raw  string
+	Kind Kind
+	Op   Op
+	// Value is the bound in the kind's canonical unit: microseconds for
+	// durations, bytes for sizes and the plain number for counts.
+	Value float64
+}
+
+// ParseComparison parses a comparison of kind k: an operator and a value,
+// such as "< 500ms" (a duration), "< 50kb" (a size) or "> 0" (a count),
+// with the operators, value forms and units of a threshold expression of
+// that kind. k must be KindDuration, KindSize or KindCount; any other kind
+// is an error, not a *ParseError. Errors about s are *ParseError.
+func ParseComparison(k Kind, s string) (Comparison, error) {
+	var example string
+	switch k {
+	case KindDuration:
+		example = "< 500ms"
+	case KindSize:
+		example = "< 50kb"
+	case KindCount:
+		example = "> 0"
+	default:
+		return Comparison{}, fmt.Errorf("thresholds: a comparison is a duration, size or count, not %s", k)
+	}
+	p := parser{s: s, bare: true}
+	p.skipSpace()
+	if p.i == len(p.s) {
+		return Comparison{}, p.fail(p.i, "the comparison is empty; write <operator> <value>, e.g. %q", example)
+	}
+	op, v, err := p.comparison(k, "")
+	if err != nil {
+		return Comparison{}, err
+	}
+	return Comparison{Raw: s, Kind: k, Op: op, Value: v}, nil
+}
+
+// Holds reports whether a measured value, in the canonical unit of c's
+// kind, satisfies c, with the == rule a threshold of the same kind uses:
+// exact for counts and sizes, within a small tolerance for durations. It
+// is false for NaN and for an unknown operator, so the zero Comparison
+// holds for nothing.
+func (c Comparison) Holds(actual float64) bool {
+	return holds(c.Op, c.Kind, actual, c.Value)
+}
+
 type parser struct {
 	s string
 	i int
+	// bare is set when parsing a comparison without a metric, for error
+	// text.
+	bare bool
 }
 
 func (p *parser) fail(pos int, format string, args ...any) error {
-	return &ParseError{Expr: p.s, Pos: pos, Msg: fmt.Sprintf(format, args...)}
+	return &ParseError{Expr: p.s, Pos: pos, Msg: fmt.Sprintf(format, args...), comparison: p.bare}
 }
 
 func (p *parser) skipSpace() {
@@ -178,6 +241,17 @@ func (p *parser) parse() (Threshold, error) {
 		return Threshold{}, p.fail(start, "%s", unknownMetric(name))
 	}
 
+	op, v, err := p.comparison(m.Kind, m.Name)
+	if err != nil {
+		return Threshold{}, err
+	}
+	return Threshold{Raw: p.s, Metric: m, Op: op, Value: v}, nil
+}
+
+// comparison parses the operator and a value of kind k, from the current
+// position to the end of the input. metric is the metric the operator
+// follows, for messages; it is "" for a bare comparison.
+func (p *parser) comparison(k Kind, metric string) (Op, float64, error) {
 	// Operator.
 	p.skipSpace()
 	opPos := p.i
@@ -193,34 +267,34 @@ func (p *parser) parse() (Threshold, error) {
 	if op == 0 {
 		switch {
 		case rest == "":
-			return Threshold{}, p.fail(opPos, "missing operator after %s; use %s", name, opList)
+			return 0, 0, p.fail(opPos, "missing operator%s; use %s", afterMetric(metric), opList)
 		case strings.HasPrefix(rest, "!="):
-			return Threshold{}, p.fail(opPos, `"!=" is not supported; use %s`, opList)
+			return 0, 0, p.fail(opPos, `"!=" is not supported; use %s`, opList)
 		case strings.HasPrefix(rest, "=<"):
-			return Threshold{}, p.fail(opPos, `unknown operator "=<"; did you mean "<="?`)
+			return 0, 0, p.fail(opPos, `unknown operator "=<"; did you mean "<="?`)
 		case strings.HasPrefix(rest, "=>"):
-			return Threshold{}, p.fail(opPos, `unknown operator "=>"; did you mean ">="?`)
+			return 0, 0, p.fail(opPos, `unknown operator "=>"; did you mean ">="?`)
 		case strings.HasPrefix(rest, "="):
-			return Threshold{}, p.fail(opPos, `use "==" to compare for equality, not "="`)
+			return 0, 0, p.fail(opPos, `use "==" to compare for equality, not "="`)
 		}
-		return Threshold{}, p.fail(opPos, "expected an operator (%s) after %s, got %q", opList, name, p.next())
+		return 0, 0, p.fail(opPos, "expected an operator (%s)%s, got %q", opList, afterMetric(metric), p.next())
 	}
 
 	// Value: digits, an optional fraction and an optional unit.
 	p.skipSpace()
 	valPos := p.i
 	if p.i == len(p.s) {
-		return Threshold{}, p.fail(valPos, "missing value after %q", op.String())
+		return 0, 0, p.fail(valPos, "missing value after %q", op.String())
 	}
 	switch c := p.s[p.i]; {
 	case c == '-':
-		return Threshold{}, p.fail(valPos, "the value must not be negative")
+		return 0, 0, p.fail(valPos, "the value must not be negative")
 	case c == '+':
-		return Threshold{}, p.fail(valPos, `remove the "+" sign; values are never negative`)
+		return 0, 0, p.fail(valPos, `remove the "+" sign; values are never negative`)
 	case c == '.':
-		return Threshold{}, p.fail(valPos, `write a digit before the decimal point, e.g. "0.5"`)
+		return 0, 0, p.fail(valPos, `write a digit before the decimal point, e.g. "0.5"`)
 	case !isDigit(c):
-		return Threshold{}, p.fail(valPos, "expected a number after %q, got %q", op.String(), p.next())
+		return 0, 0, p.fail(valPos, "expected a number after %q, got %q", op.String(), p.next())
 	}
 	for p.i < len(p.s) && isDigit(p.s[p.i]) {
 		p.i++
@@ -229,7 +303,7 @@ func (p *parser) parse() (Threshold, error) {
 	if p.i < len(p.s) && p.s[p.i] == '.' {
 		p.i++
 		if p.i == len(p.s) || !isDigit(p.s[p.i]) {
-			return Threshold{}, p.fail(p.i-1, "a decimal point must be followed by digits")
+			return 0, 0, p.fail(p.i-1, "a decimal point must be followed by digits")
 		}
 		for p.i < len(p.s) && isDigit(p.s[p.i]) {
 			if p.s[p.i] != '0' {
@@ -242,11 +316,11 @@ func (p *parser) parse() (Threshold, error) {
 	if p.i < len(p.s) {
 		c := p.s[p.i]
 		if c == '.' {
-			return Threshold{}, p.fail(p.i, "a number has at most one decimal point")
+			return 0, 0, p.fail(p.i, "a number has at most one decimal point")
 		}
 		if (c == 'e' || c == 'E') && p.i+1 < len(p.s) {
 			if d := p.s[p.i+1]; isDigit(d) || d == '+' || d == '-' {
-				return Threshold{}, p.fail(p.i, "exponents are not supported; write the number out in full")
+				return 0, 0, p.fail(p.i, "exponents are not supported; write the number out in full")
 			}
 		}
 	}
@@ -263,20 +337,33 @@ func (p *parser) parse() (Threshold, error) {
 	if p.i < len(p.s) {
 		r, _ := utf8.DecodeRuneInString(p.s[p.i:])
 		if unit == "" && unitPos < p.i && (r == '%' || unicode.IsLetter(r)) {
-			return Threshold{}, p.fail(unitPos, "remove the space between the number and its unit")
+			return 0, 0, p.fail(unitPos, "remove the space between the number and its unit")
 		}
-		return Threshold{}, p.fail(p.i, "unexpected %q after the value", string(r))
+		return 0, 0, p.fail(p.i, "unexpected %q after the value", string(r))
 	}
 
-	v, msg, atUnit := value(m, number, unit, whole)
+	subject := metric
+	if subject == "" {
+		subject = "the value"
+	}
+	v, msg, atUnit := value(k, subject, number, unit, whole)
 	if msg != "" {
 		pos := valPos
 		if atUnit {
 			pos = unitPos
 		}
-		return Threshold{}, p.fail(pos, "%s", msg)
+		return 0, 0, p.fail(pos, "%s", msg)
 	}
-	return Threshold{Raw: p.s, Metric: m, Op: op, Value: v}, nil
+	return op, v, nil
+}
+
+// afterMetric is " after <metric>" for operator messages, or "" with no
+// metric.
+func afterMetric(metric string) string {
+	if metric == "" {
+		return ""
+	}
+	return " after " + metric
 }
 
 // decimal returns number×10^exp as the nearest float64. Applying a power of
@@ -324,13 +411,14 @@ func hasNonZeroDigit(number string) bool {
 	return strings.ContainsAny(number, "123456789")
 }
 
-// value converts a number and unit to the canonical unit of m's kind. It
-// returns a message when the value does not fit the metric; atUnit is set
-// when the problem is the unit rather than the number.
-func value(m Metric, number, unit string, whole bool) (v float64, msg string, atUnit bool) {
+// value converts a number and unit to the canonical unit of kind k. It
+// returns a message when the value does not fit the kind, naming the value
+// as subject (a metric name, or "the value"); atUnit is set when the
+// problem is the unit rather than the number.
+func value(k Kind, subject, number, unit string, whole bool) (v float64, msg string, atUnit bool) {
 	if strings.HasPrefix(unit, "\u039c") {
 		const mu = "%s starts with the Greek capital letter Mu, not an ASCII M; "
-		switch m.Kind {
+		switch k {
 		case KindDuration:
 			return 0, fmt.Sprintf(mu+`write "us" (or "µs") for microseconds, or "ms" for milliseconds`, quoteShort(unit)), true
 		case KindSize:
@@ -358,9 +446,9 @@ func value(m Metric, number, unit string, whole bool) (v float64, msg string, at
 		return v, "", false
 	}
 	badUnit := func(format string) (float64, string, bool) {
-		return 0, fmt.Sprintf(format, m.Name, quoteShort(unit)), true
+		return 0, fmt.Sprintf(format, subject, quoteShort(unit)), true
 	}
-	switch m.Kind {
+	switch k {
 	case KindDuration:
 		switch u {
 		case "us":
@@ -372,7 +460,7 @@ func value(m Metric, number, unit string, whole bool) (v float64, msg string, at
 		case "m":
 			return scale(6, 60)
 		case "":
-			return 0, fmt.Sprintf("%s is a duration and needs a unit (us, ms, s or m); did you mean %s?", m.Name, quoteShort(number+"ms")), false
+			return 0, fmt.Sprintf("%s is a duration and needs a unit (us, ms, s or m); did you mean %s?", subject, quoteShort(number+"ms")), false
 		case "ns":
 			return 0, `"ns" is not supported; the smallest unit is us (microseconds)`, true
 		}
@@ -391,7 +479,7 @@ func value(m Metric, number, unit string, whole bool) (v float64, msg string, at
 				pct := shiftDecimal(number, 2)
 				hint = fmt.Sprintf("%s (or %s if %s is a fraction)", hint, quoteShort(pct+"%"), cutShort(number))
 			}
-			return 0, fmt.Sprintf(`%s is a rate and needs "%%"; did you mean %s?`, m.Name, hint), false
+			return 0, fmt.Sprintf(`%s is a rate and needs "%%"; did you mean %s?`, subject, hint), false
 		}
 		return badUnit("%s is a rate; write a percentage such as 5%%, not %s")
 	case KindCount:
@@ -399,7 +487,7 @@ func value(m Metric, number, unit string, whole bool) (v float64, msg string, at
 			return badUnit("%s is a count; write a plain number such as 100, without %s")
 		}
 		if !whole {
-			return 0, fmt.Sprintf("%s is a count; use a whole number", m.Name), false
+			return 0, fmt.Sprintf("%s is a count; use a whole number", subject), false
 		}
 		return scale(0, 1)
 	case KindThroughput:
@@ -417,7 +505,7 @@ func value(m Metric, number, unit string, whole bool) (v float64, msg string, at
 		case "", "b":
 			// Unscaled: the literal itself must be whole, as for counts.
 			if !whole {
-				return 0, fmt.Sprintf("%s is a size; use a whole number of bytes", m.Name), false
+				return 0, fmt.Sprintf("%s is a size; use a whole number of bytes", subject), false
 			}
 			return scale(0, 1)
 		case "kb":
@@ -437,7 +525,7 @@ func value(m Metric, number, unit string, whole bool) (v float64, msg string, at
 		}
 		if bytes, ok := wholeBytes(number, exp, pow2); !ok {
 			return 0, fmt.Sprintf("%s is a size; use a whole number of bytes (%s is %s bytes)",
-				m.Name, quoteShort(number+unit), quoteShort(bytes)), false
+				subject, quoteShort(number+unit), quoteShort(bytes)), false
 		}
 		if pow2 > 0 {
 			return scale(0, float64(uint64(1)<<pow2))

@@ -2,6 +2,172 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/volt-test/contract/main/schema/test-definition.schema.json",
   "$defs": {
+    "Check": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the check in results, unique within the step. Without one,\nthe check is named after its type, selector, operator and value, and\nfor every type except header that label contains the expected value\nas written; give a check whose value is sensitive a name."
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "status",
+            "header",
+            "body",
+            "json",
+            "html",
+            "timing",
+            "url",
+            "cookie"
+          ],
+          "description": "What the check reads: \"status\" (the status code), \"header\", \"body\",\n\"json\" (the body as JSON), \"html\" (the body as HTML), \"timing\", \"url\"\n(the final URL after redirects; the request URL when redirects are\nnot followed) or \"cookie\"."
+        },
+        "selector": {
+          "type": "string",
+          "description": "What to read, by type: the header name for header (case-insensitive;\nwhen the header repeats, any of its values may match), a JSON path\nsuch as \"$.data.items[0].id\" for json, a CSS selector for html, the\ncookie name for cookie. Other types take no selector."
+        },
+        "in": {
+          "items": {
+            "type": "integer",
+            "maximum": 599,
+            "minimum": 100
+          },
+          "type": "array",
+          "description": "status: the status code is one of these."
+        },
+        "not_in": {
+          "items": {
+            "type": "integer",
+            "maximum": 599,
+            "minimum": 100
+          },
+          "type": "array",
+          "description": "status: the status code is none of these."
+        },
+        "between": {
+          "anyOf": [
+            {
+              "maxItems": 0
+            },
+            {
+              "maxItems": 2,
+              "minItems": 2
+            }
+          ],
+          "items": {
+            "type": "integer",
+            "maximum": 599,
+            "minimum": 100
+          },
+          "type": "array",
+          "description": "status: the status code is within [low, high], both included."
+        },
+        "equals": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            }
+          ],
+          "description": "header, body, html, url (a string) and json (a string, number or\ntrue/false): the value is exactly this. For html, the value is the\ntext content of the first matching element (its text and its\ndescendants' text, without tags) with leading and trailing white\nspace trimmed. For json, equality is between scalars only; an object\nor array never equals. A string equals a string with the same text,\ntrue/false the same value, and a number a number with the same exact\ndecimal value (42 equals 42.0 and 4.2e1, with no float64 rounding);\na string never equals a number or true/false."
+        },
+        "contains": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            }
+          ],
+          "description": "header, body, url (a non-empty string): the value contains this\ntext. json (a string, number or true/false): the array contains\nthis element, compared as equals compares; any other JSON kind\nfails the check."
+        },
+        "not_contains": {
+          "type": "string",
+          "description": "body: the body does not contain this text."
+        },
+        "matches": {
+          "type": "string",
+          "description": "header, body, url and json: the value matches this regular\nexpression (RE2 syntax). For json, it applies to string values; any\nother JSON kind fails the check."
+        },
+        "exists": {
+          "type": "boolean",
+          "const": true,
+          "description": "header, html, cookie and json: the header, element, cookie or path\nis present. For cookie, it reads the Set-Cookie headers of this\nresponse. Must be true."
+        },
+        "missing": {
+          "type": "boolean",
+          "const": true,
+          "description": "json: the path is absent. Must be true."
+        },
+        "empty": {
+          "type": "boolean",
+          "const": true,
+          "description": "body: the body is empty. Must be true."
+        },
+        "is": {
+          "anyOf": [
+            {
+              "enum": [
+                "array",
+                "object",
+                "string",
+                "number",
+                "bool",
+                "null"
+              ]
+            },
+            {
+              "maxLength": 0
+            }
+          ],
+          "type": "string",
+          "description": "json: the value at the path is of this JSON kind: \"array\",\n\"object\", \"string\", \"number\", \"bool\" or \"null\"."
+        },
+        "count": {
+          "type": "string",
+          "description": "json: the array at the path has this many elements, e.g. \"\u003e 0\". A\nvalue that is not an array fails the check."
+        },
+        "size": {
+          "type": "string",
+          "description": "body: the size of the decoded response body in bytes, e.g. \"\u003c 50kb\"."
+        },
+        "duration": {
+          "type": "string",
+          "description": "timing: the total request time, the same measurement the duration\nthresholds use, e.g. \"\u003c 500ms\"."
+        },
+        "on_fail": {
+          "anyOf": [
+            {
+              "enum": [
+                "record",
+                "fail",
+                "abort"
+              ]
+            },
+            {
+              "maxLength": 0
+            }
+          ],
+          "type": "string",
+          "description": "What a failure does: \"record\" counts it toward the check rate only,\n\"fail\" also fails the run, and \"abort\" fails the run and ends the\nvirtual user's current iteration after the step's other checks are\nevaluated (the test goes on). Defaults: \"fail\" for status, \"record\"\nfor every other type."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "description": "An assertion on the response: a type, a selector where the type needs one, and exactly one operator."
+    },
     "DataConfig": {
       "anyOf": [
         {
@@ -54,6 +220,29 @@
       "description": "A CSV data source. Each virtual user takes rows according to mode."
     },
     "Extract": {
+      "dependentSchemas": {
+        "on_fail": {
+          "anyOf": [
+            {
+              "properties": {
+                "on_fail": {
+                  "maxLength": 0
+                }
+              }
+            },
+            {
+              "properties": {
+                "required": {
+                  "const": true
+                }
+              },
+              "required": [
+                "required"
+              ]
+            }
+          ]
+        }
+      },
       "properties": {
         "variable_name": {
           "type": "string",
@@ -79,6 +268,26 @@
             "html"
           ],
           "description": "Where to read the value from."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Treat a miss (nothing found) as a failed check labelled\n\"extract \u003cvariable_name\u003e\". Required or not, an extractor always\nassigns its variable; a miss assigns \"\"."
+        },
+        "on_fail": {
+          "anyOf": [
+            {
+              "enum": [
+                "record",
+                "fail",
+                "abort"
+              ]
+            },
+            {
+              "maxLength": 0
+            }
+          ],
+          "type": "string",
+          "description": "What a miss does when required is true: \"record\", \"fail\" or \"abort\"\n(the default). Only applies with required: true."
         }
       },
       "additionalProperties": false,
@@ -231,6 +440,13 @@
           },
           "type": "array",
           "description": "Values to capture from the response into ${variable_name}."
+        },
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/Check"
+          },
+          "type": "array",
+          "description": "Assertions on the response. Each check is reported separately. When\nno response is received (a transport error or a timeout), the\nstep's checks are not evaluated and not counted."
         },
         "think_time": {
           "type": "string",
@@ -420,6 +636,15 @@
       },
       "type": "array",
       "description": "Pass/fail rules for the whole test, e.g. \"p95 \u003c 500ms\" or\n\"error_rate \u003c 1%\"."
+    },
+    "expected_statuses": {
+      "items": {
+        "type": "integer",
+        "maximum": 599,
+        "minimum": 100
+      },
+      "type": "array",
+      "description": "HTTP status codes (100-599) that count as a successful request, for\nsteps without a status check whose on_fail is fail or abort; such a\ncheck decides for its own step instead. Leave it out (or write []) to\nuse the engine's default."
     }
   },
   "additionalProperties": false,

@@ -41,6 +41,9 @@ func sample(t reflect.Type) any {
 	if t == reflect.TypeOf(SchemaVersion{}) {
 		return "2.0"
 	}
+	if t == reflect.TypeOf(Scalar{}) {
+		return "s"
+	}
 	if reflect.PointerTo(t).Implements(objectFormerType) {
 		return sample(reflect.TypeOf(reflect.New(t).Interface().(objectFormer).objectForm()))
 	}
