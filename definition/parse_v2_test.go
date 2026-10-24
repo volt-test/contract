@@ -32,7 +32,7 @@ var unknownFixtures = map[string][]string{
 	"unknown_top.json":                    {"retries"},
 	"unknown_target.json":                 {"target.timeout"},
 	"unknown_scenario.json":               {"scenarios[1].iterations"},
-	"unknown_step.json":                   {"scenarios[0].steps[2].checks"},
+	"unknown_step.json":                   {"scenarios[0].steps[2].assertions"},
 	"unknown_request.json":                {"scenarios[1].steps[0].request.retries"},
 	"unknown_extract.json":                {"scenarios[0].steps[1].extract[1].default"},
 	"unknown_data_config.json":            {"scenarios[0].data_config.delimiter"},
@@ -46,6 +46,7 @@ var unknownFixtures = map[string][]string{
 	"unknown_v1_cli_keys.json":            {"api_key", "cloud", "cloud_timeout", "existing_test_id", "skip_lookup"},
 	"unknown_multiple.json":               {"alpha", "scenarios[0].steps[0].think", "scenarios[1].steps[0].request.retries", "target.proxy", "zeta"},
 	"unknown_threshold_key.json":          {"thresholds[1].abort_on_fial"},
+	"unknown_check.json":                  {"scenarios[0].steps[0].checks[0].operator"},
 }
 
 func TestV2UnknownFields(t *testing.T) {

@@ -67,6 +67,11 @@ type Definition struct {
 	// Pass/fail rules for the whole test, e.g. "p95 < 500ms" or
 	// "error_rate < 1%".
 	Thresholds []ThresholdConfig `json:"thresholds,omitempty" contract:"v2"`
+	// HTTP status codes (100-599) that count as a successful request, for
+	// steps without a status check whose on_fail is fail or abort; such a
+	// check decides for its own step instead. Leave it out (or write []) to
+	// use the engine's default.
+	ExpectedStatuses []int `json:"expected_statuses,omitempty" contract:"v2"`
 
 	// Weights repeats the scenario weights (v1 only).
 	Weights []int `json:"weights,omitempty" contract:"v1,loose" jsonschema:"-"`
@@ -218,6 +223,10 @@ type Step struct {
 	Request Request `json:"request" jsonschema:"required"`
 	// Values to capture from the response into ${variable_name}.
 	Extract []Extract `json:"extract,omitempty"`
+	// Assertions on the response. Each check is reported separately. When
+	// no response is received (a transport error or a timeout), the
+	// step's checks are not evaluated and not counted.
+	Checks []Check `json:"checks,omitempty" contract:"v2"`
 	// Validate holds the v1 response checks.
 	Validate []LegacyValidator `json:"validate,omitempty" contract:"v1" jsonschema:"-"`
 	// Pause after the step, e.g. "500ms".
@@ -273,6 +282,94 @@ type Extract struct {
 	Attribute string `json:"attribute,omitempty"`
 	// Where to read the value from.
 	Type string `json:"type" jsonschema:"required,enum=json,enum=regex,enum=header,enum=cookie,enum=html"`
+	// Treat a miss (nothing found) as a failed check labelled
+	// "extract <variable_name>". Required or not, an extractor always
+	// assigns its variable; a miss assigns "".
+	Required bool `json:"required,omitempty" contract:"v2"`
+	// What a miss does when required is true: "record", "fail" or "abort"
+	// (the default). Only applies with required: true.
+	OnFail FailMode `json:"on_fail,omitempty" contract:"v2"`
+}
+
+// Check is a v2 assertion on a step's response: a type, an optional
+// selector and exactly one operator. See Label for how a check is named in
+// results and FailMode for what a failure does.
+//
+// A key with its zero value ("" or []) counts as absent, except equals and
+// contains, which are values whenever written ("equals": "" checks for an
+// empty value), and exists, missing and empty, which must be true when
+// written. Values and selectors are literal: a ${variable} in them is
+// compared as written, not replaced.
+type Check struct {
+	// Name of the check in results, unique within the step. Without one,
+	// the check is named after its type, selector, operator and value, and
+	// for every type except header that label contains the expected value
+	// as written; give a check whose value is sensitive a name.
+	Name string `json:"name,omitempty"`
+	// What the check reads: "status" (the status code), "header", "body",
+	// "json" (the body as JSON), "html" (the body as HTML), "timing", "url"
+	// (the final URL after redirects; the request URL when redirects are
+	// not followed) or "cookie".
+	Type CheckType `json:"type" jsonschema:"required,enum=status,enum=header,enum=body,enum=json,enum=html,enum=timing,enum=url,enum=cookie"`
+	// What to read, by type: the header name for header (case-insensitive;
+	// when the header repeats, any of its values may match), a JSON path
+	// such as "$.data.items[0].id" for json, a CSS selector for html, the
+	// cookie name for cookie. Other types take no selector.
+	Selector string `json:"selector,omitempty"`
+
+	// status: the status code is one of these.
+	In []int `json:"in,omitempty"`
+	// status: the status code is none of these.
+	NotIn []int `json:"not_in,omitempty"`
+	// status: the status code is within [low, high], both included.
+	Between []int `json:"between,omitempty"`
+	// header, body, html, url (a string) and json (a string, number or
+	// true/false): the value is exactly this. For html, the value is the
+	// text content of the first matching element (its text and its
+	// descendants' text, without tags) with leading and trailing white
+	// space trimmed. For json, equality is between scalars only; an object
+	// or array never equals. A string equals a string with the same text,
+	// true/false the same value, and a number a number with the same exact
+	// decimal value (42 equals 42.0 and 4.2e1, with no float64 rounding);
+	// a string never equals a number or true/false.
+	Equals *Scalar `json:"equals,omitempty"`
+	// header, body, url (a non-empty string): the value contains this
+	// text. json (a string, number or true/false): the array contains
+	// this element, compared as equals compares; any other JSON kind
+	// fails the check.
+	Contains *Scalar `json:"contains,omitempty"`
+	// body: the body does not contain this text.
+	NotContains string `json:"not_contains,omitempty"`
+	// header, body, url and json: the value matches this regular
+	// expression (RE2 syntax). For json, it applies to string values; any
+	// other JSON kind fails the check.
+	Matches string `json:"matches,omitempty"`
+	// header, html, cookie and json: the header, element, cookie or path
+	// is present. For cookie, it reads the Set-Cookie headers of this
+	// response. Must be true.
+	Exists *bool `json:"exists,omitempty"`
+	// json: the path is absent. Must be true.
+	Missing *bool `json:"missing,omitempty"`
+	// body: the body is empty. Must be true.
+	Empty *bool `json:"empty,omitempty"`
+	// json: the value at the path is of this JSON kind: "array",
+	// "object", "string", "number", "bool" or "null".
+	Is string `json:"is,omitempty"`
+	// json: the array at the path has this many elements, e.g. "> 0". A
+	// value that is not an array fails the check.
+	Count string `json:"count,omitempty"`
+	// body: the size of the decoded response body in bytes, e.g. "< 50kb".
+	Size string `json:"size,omitempty"`
+	// timing: the total request time, the same measurement the duration
+	// thresholds use, e.g. "< 500ms".
+	Duration string `json:"duration,omitempty"`
+
+	// What a failure does: "record" counts it toward the check rate only,
+	// "fail" also fails the run, and "abort" fails the run and ends the
+	// virtual user's current iteration after the step's other checks are
+	// evaluated (the test goes on). Defaults: "fail" for status, "record"
+	// for every other type.
+	OnFail FailMode `json:"on_fail,omitempty"`
 }
 
 // LegacyValidator is a v1 response check (a step's "validate" entry).

@@ -100,7 +100,7 @@
               "Content-Type": "application/json"
             }
           },
-          "checks": []
+          "assertions": []
         }
       ]
     },

@@ -1,0 +1,133 @@
+{
+  "schema_version": "2.0",
+  "name": "Every check type and operator",
+  "virtual_users": 5,
+  "duration": "1m",
+  "target": {
+    "base_url": "https://shop.example.com"
+  },
+  "expected_statuses": [200, 201, 204, 301, 302, 404],
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Status",
+          "request": {
+            "method": "GET",
+            "url": "/health"
+          },
+          "checks": [
+            { "type": "status", "in": [200, 201] },
+            { "type": "status", "not_in": [500, 502, 503], "on_fail": "abort" },
+            { "type": "status", "between": [200, 299], "on_fail": "record" },
+            { "name": "", "type": "status", "selector": "", "in": [], "not_in": [], "between": [100, 599], "on_fail": "" }
+          ]
+        },
+        {
+          "name": "Headers",
+          "request": {
+            "method": "GET",
+            "url": "/items"
+          },
+          "checks": [
+            { "type": "header", "selector": "Content-Type", "equals": "application/json; charset=utf-8" },
+            { "type": "header", "selector": "Cache-Control", "contains": "max-age" },
+            { "type": "header", "selector": "X-Request-Id", "exists": true, "on_fail": "fail" },
+            { "type": "header", "selector": "ETag", "matches": "^W/\"[0-9a-f]+\"$" },
+            { "name": "vary on encoding", "type": "header", "selector": "Vary", "equals": "Accept-Encoding" },
+            { "name": "vary on language", "type": "header", "selector": "Vary", "equals": "Accept-Language" }
+          ]
+        },
+        {
+          "name": "Body",
+          "request": {
+            "method": "GET",
+            "url": "/search?q=caf%C3%A9"
+          },
+          "checks": [
+            { "type": "body", "equals": "<p>Caf\u00e9 & Bar > Shop</p>" },
+            { "type": "body", "contains": "Caf\u00e9 \u2028 <b>" },
+            { "type": "body", "not_contains": "Internal Server Error" },
+            { "type": "body", "matches": "(?i)results?: \\d+" },
+            { "type": "body", "size": "< 50kb" },
+            { "type": "body", "empty": true, "on_fail": "record" },
+            { "type": "body", "equals": "" }
+          ]
+        },
+        {
+          "name": "JSON",
+          "request": {
+            "method": "GET",
+            "url": "/api/items"
+          },
+          "extract": [
+            { "variable_name": "first_id", "selector": "data.items[0].id", "type": "json", "required": true },
+            { "variable_name": "cursor", "selector": "meta.cursor", "type": "json", "required": true, "on_fail": "record" },
+            { "variable_name": "etag", "selector": "ETag", "type": "header", "required": false, "on_fail": "" },
+            { "variable_name": "page", "selector": "meta.page", "type": "json" }
+          ],
+          "checks": [
+            { "type": "json", "selector": "$.data.items[0].id", "exists": true },
+            { "type": "json", "selector": "$.data.items[0].id", "equals": 42 },
+            { "type": "json", "selector": "$.data.items[0].sku", "equals": 1234567890123456789 },
+            { "type": "json", "selector": "$.data.items[0].price", "equals": 1.50 },
+            { "type": "json", "selector": "$.data.items[0].active", "equals": true },
+            { "type": "json", "selector": "$.data.items[0].name", "equals": "Caf\u00e9 <&> \u2028" },
+            { "type": "json", "selector": "$.error", "missing": true },
+            { "type": "json", "selector": "$.data.items", "is": "array" },
+            { "type": "json", "selector": "$.meta", "is": "object" },
+            { "type": "json", "selector": "$.data.next", "is": "null" },
+            { "type": "json", "selector": "$.data.items", "count": "> 0" },
+            { "type": "json", "selector": "$.data.items[0].slug", "matches": "^[a-z0-9-]+$" },
+            { "type": "json", "selector": "$.data.tags", "contains": "sale" },
+            { "type": "json", "selector": "$.data.ids", "contains": 7 },
+            { "type": "json", "selector": "$.data.flags", "contains": false },
+            { "type": "json", "selector": "$.data.labels", "contains": "" },
+            { "type": "json", "selector": "$.data.total", "equals": -1e3, "on_fail": "abort" }
+          ]
+        },
+        {
+          "name": "HTML",
+          "request": {
+            "method": "GET",
+            "url": "/"
+          },
+          "checks": [
+            { "type": "html", "selector": "form#login input[name=email]", "exists": true },
+            { "type": "html", "selector": "h1", "equals": "Sale" },
+            { "type": "html", "selector": "title", "equals": "" }
+          ]
+        },
+        {
+          "name": "Timing and URL",
+          "request": {
+            "method": "GET",
+            "url": "/old-path"
+          },
+          "checks": [
+            { "type": "timing", "duration": "< 500ms", "on_fail": "fail" },
+            { "type": "url", "equals": "https://shop.example.com/new-path" },
+            { "type": "url", "contains": "/new-" },
+            { "type": "url", "matches": "^https://shop\\.example\\.com/" }
+          ]
+        },
+        {
+          "name": "Cookie",
+          "request": {
+            "method": "POST",
+            "url": "/login",
+            "body": "{\"email\":\"user@example.com\"}",
+            "headers": {
+              "Content-Type": "application/json"
+            }
+          },
+          "checks": [
+            { "type": "cookie", "selector": "session_id", "exists": true, "on_fail": "abort" },
+            { "name": "status <ok> & \u00e9 \u2028", "type": "status", "in": [200] }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -29,7 +29,8 @@ v2 and later definitions carry `schema_version` as a `"MAJOR.MINOR"` string.
 - Missing, `null`, `1`, `"1"` or `"1.0"` means v1.
 - v2 is `"2.0"`. It is a preview until SDK 2.0.0 ships: fields may still
   join `"2.0"` until then. After that, each new definition field bumps the
-  minor.
+  minor. [Checks](#checks), `expected_statuses` and the extractor keys
+  `required` and `on_fail` joined `"2.0"` under this rule.
 - A reader rejects an unknown major, or a minor newer than it supports.
 
 The module version and `schema_version` move independently: schema `"2.0"`
@@ -53,11 +54,16 @@ does not mean module v2.
   - known extractor types, data formats and data modes;
   - thresholds: every expression parses, each metric is allowed at its
     scope, and `delay_abort` is a non-negative duration set only with
-    `abort_on_fail: true` (see [Thresholds](#thresholds)).
+    `abort_on_fail: true` (see [Thresholds](#thresholds));
+  - checks: a known type, exactly one operator that the type takes, a
+    selector when the type needs one, values of the right kind, status
+    codes from 100 to 599, and a unique label per step (see
+    [Checks](#checks)).
 - **v1** is read the way the v1 readers (the CLI, the cloud engine and the
   backend) read it. Unknown keys are ignored, keys match case-insensitively,
-  and v2-only keys (`target.base_url` and `thresholds` at every level) are
-  dropped unread, whatever their value. Values are
+  and v2-only keys (`target.base_url`, `thresholds` at every level,
+  `expected_statuses`, a step's `checks`, and an extractor's `required` and
+  `on_fail`) are dropped unread, whatever their value. Values are
   checked for their JSON type only:
   - **core** fields, which every v1 reader decodes: a value of the wrong
     type fails `Parse`, as it fails every reader;
@@ -115,8 +121,12 @@ It is accepted by `Parse` but is not part of the published schema.
 
 The schema is necessary, not sufficient: every definition `Parse` accepts
 as v2 passes the schema, but `Parse` is stricter. It also checks
-durations, URL forms, unique names, parts of the load model, and threshold
-expressions and their scopes (the schema only requires a non-empty string).
+durations, URL forms, unique names, parts of the load model, threshold
+expressions and their scopes (the schema only requires a non-empty string),
+and the check rules the schema cannot express: one operator per check and
+only the operators its type takes, selectors, the value kind per type,
+regular expressions, comparisons, `between` order and unique check
+labels.
 
 ### Error size
 
@@ -221,6 +231,168 @@ In Go, `definition.ThresholdConfig` holds a threshold as written,
 every threshold of a parsed definition as a `thresholds.Bound` with the
 scenario and step it applies to. Values are held in canonical units:
 microseconds, fractions (1% is 0.01) and bytes.
+
+## Checks
+
+A v2 step can carry `checks`: assertions on its response. Each check has
+a `type`, a `selector` when the type needs one, exactly one operator, and
+optional `name` and `on_fail`.
+
+```json
+"checks": [
+  {"type": "status", "in": [200, 201]},
+  {"type": "header", "selector": "Content-Type", "contains": "application/json"},
+  {"type": "json", "selector": "$.data.items[0].id", "equals": 42},
+  {"type": "timing", "duration": "< 500ms", "on_fail": "abort"}
+]
+```
+
+| Type | Selector | Operators | Value of `equals` / `contains` |
+|---|---|---|---|
+| `status` | none | `in`, `not_in`, `between` | |
+| `header` | the header name | `equals`, `contains`, `exists`, `matches` | a string |
+| `body` | none | `equals`, `contains`, `not_contains`, `matches`, `size`, `empty` | a string |
+| `json` | a JSON path, e.g. `$.data.items[0].id` | `equals`, `exists`, `missing`, `is`, `count`, `matches`, `contains` | a string, number or `true`/`false` |
+| `html` | a CSS selector | `exists`, `equals` | a string |
+| `timing` | none | `duration` | |
+| `url` | none | `equals`, `contains`, `matches` | a string |
+| `cookie` | the cookie name | `exists` | |
+
+- `in` and `not_in` are lists of status codes; `between` is `[low, high]`,
+  both included, with `low <= high`. Codes run from 100 to 599.
+- `matches` is a regular expression in RE2 syntax and must compile.
+  `contains` must not be `""` for `header`, `body` and `url` (an empty
+  string is in every value); `json` allows it.
+- `count` (a JSON array's length), `size` (the decoded response body, in
+  bytes) and `duration` (the total request time, the same measurement as
+  the duration thresholds) are comparisons such as `"> 0"`, `"< 50kb"` or
+  `"< 500ms"`. They use the operators, value forms, units and `==` rule of
+  [threshold expressions](#thresholds) of the same kind, without the
+  metric; `thresholds.ParseComparison` reads them.
+- `is` is one of `array`, `object`, `string`, `number`, `bool`, `null`.
+- `header` names are case-insensitive; when a header repeats, any of its
+  values may match. `cookie` reads the `Set-Cookie` headers of this
+  response. `url` is the final URL after redirects (the request URL when
+  redirects are not followed).
+- On `json`, `equals` compares scalars only (an object or array never
+  equals), `count` applies to arrays, `matches` to strings and `contains`
+  to arrays; any other JSON kind at the path fails the check. A number
+  keeps its literal as written, so a 19-digit id loses no digits; a
+  number outside float64 range, such as `1e999`, is rejected.
+- On `json`, a string equals a string with the same text, `true`/`false`
+  the same value, and a number a number with the same exact decimal value:
+  `42` equals `42.0` and `4.2e1`, with no float64 rounding, so
+  `1234567890123456789` does not equal `1234567890123456788`. A string
+  never equals a number or `true`/`false`: `"42"` does not equal `42`.
+  `contains` compares each array element the same way.
+- On `html`, `equals` compares the text content of the first element the
+  selector matches (the text of the element and its descendants, without
+  tags), with leading and trailing white space trimmed: the same value an
+  `html` extractor without `attribute` reads. `<h1> <b>Sale</b> </h1>`
+  equals `"Sale"`. `exists` passes when any element matches.
+- Check values and selectors are literal: a `${variable}` in them is
+  compared as written, not replaced by the variable's value.
+- When no response is received (a transport error or a timeout), the
+  step's checks are not evaluated and not counted.
+
+### Zero values
+
+A key with its zero value counts as absent: `""` for `name`, `selector`,
+`on_fail`, `not_contains`, `matches`, `is`, `count`, `size` and
+`duration`, and `[]` for `in`, `not_in`, `between` and
+`expected_statuses`. Marshalling a parsed definition leaves them out. Two
+exceptions:
+
+- `equals` and `contains` are values whenever they are written:
+  `"equals": ""` checks for an empty value.
+- `exists`, `missing` and `empty` must be `true` when written; `false` is
+  rejected (use `missing` instead of `exists: false` on a JSON path).
+
+### on_fail
+
+| `on_fail` | A failure… |
+|---|---|
+| `record` | counts toward `check_rate` only; it does not fail the run |
+| `fail` | counts toward `check_rate` and fails the run |
+| `abort` | counts toward `check_rate`, fails the run, and ends the virtual user's current iteration once the step's other checks have been evaluated |
+
+The default is `fail` for `status` checks and `record` for every other
+type. `abort` ends the iteration, not the test: the test goes on, unlike
+a threshold's `abort_on_fail`, which stops the test. Record-mode failures
+still lower `check_rate`, so a `check_rate` threshold can fail the run on
+them.
+
+### Required extractors
+
+An extractor with `"required": true` turns a miss (nothing found) into a
+failed check labelled `extract <variable_name>`, with `on_fail` defaulting
+to `abort`. `on_fail` is rejected on an extractor without
+`"required": true`. Required or not, an extractor always assigns its
+variable; a miss assigns `""`.
+
+A required extractor counts as one check on every response its step
+evaluates: a hit passes, a miss fails. An extractor without
+`"required": true` is never counted. When no response is received,
+required extractors are not counted, like checks. When a check or a
+required extractor with `on_fail: "abort"` fails, the step's other checks
+and extractors are still evaluated, and every extractor assigns its
+variable, before the iteration ends.
+
+### expected_statuses
+
+`expected_statuses` on the test lists the status codes (100 to 599) that
+count as a successful request. It applies to every step without a status
+check whose `on_fail` is `fail` or `abort`; such a check decides for its
+own step instead. A status check with `on_fail: "record"` does not change
+which responses count as failed requests.
+
+Without `expected_statuses` (or with `[]`) the engine decides. Its
+current rule is that a status from 200 to 499 is a success and any other
+status, such as a 5xx, is a failed request. This may change when the v2
+default is decided.
+
+### Identity
+
+Results name each check by its label, which is unique within its step
+(`Parse` rejects duplicates). `Check.Label` returns it:
+
+- a `name` with a non-space character, as written (names are not cut);
+- otherwise a label derived from the decoded check,
+  `<type>[ <selector>] <operator>[ <value>]`:
+
+  ```text
+  status in [200,201]
+  json $.data.items[0].id equals 42
+  html h1 equals "Sale"
+  timing duration < 500ms
+  header Authorization equals
+  ```
+
+  The selector is written as it is. String values are JSON-encoded
+  without HTML escaping, numbers keep their literal, status codes are
+  written as a JSON array, and comparisons and `is` are written as they
+  are. `exists`, `missing` and `empty` have no value. A derived label is built from decoded values, so it is the same
+  however the JSON was escaped, and it is cut to 128 bytes on a UTF-8
+  boundary.
+- **Header labels leave the value out** for every operator, so header
+  values such as tokens never reach results. Two header checks on one
+  header with the same operator get the same label and need names.
+- **Every other derived label contains the expected value** as written:
+  a URL with a token in its query string, a JSON value or a `matches`
+  pattern reaches results as written. Give a check whose value is
+  sensitive a `name`.
+
+Uniqueness is checked on the cut label, the string results carry. A
+required extractor counts as a check labelled `extract <variable_name>`,
+so two required extractors for one variable in a step collide, and so
+does a check named `extract <variable_name>`.
+
+A check in results is identified by its scenario's name, its step's name
+and its label together. Each is unique at its level (scenario names in
+the test, step names in their scenario, labels in their step), so a label
+alone is not: steps in different scenarios can share one. Results also
+carry the check's `type`, which describes the check and is not part of
+the key.
 
 ## Compatibility
 

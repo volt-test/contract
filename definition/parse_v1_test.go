@@ -22,7 +22,9 @@ var knownDropped = map[string]bool{
 // which the v1 path drops unread (v1 readers ignore it).
 func v2OnlyDropped(path string) bool {
 	p := pattern(path)
-	for _, prefix := range []string{"thresholds[]", "scenarios[].thresholds[]", "scenarios[].steps[].thresholds[]", "target.base_url"} {
+	for _, prefix := range []string{"thresholds[]", "scenarios[].thresholds[]", "scenarios[].steps[].thresholds[]", "target.base_url",
+		"expected_statuses[]", "scenarios[].steps[].checks", "scenarios[].steps[].extract[].required",
+		"scenarios[].steps[].extract[].on_fail"} {
 		if p == prefix || strings.HasPrefix(p, prefix+".") || strings.HasPrefix(p, prefix+"[") {
 			return true
 		}

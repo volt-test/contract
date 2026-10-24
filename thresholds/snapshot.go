@@ -213,6 +213,23 @@ func (s *Scope) check() error {
 	return nil
 }
 
+// Validate reports whether s alone satisfies the invariants that Add and
+// Merge require and that Evaluate needs to read it (see the package
+// documentation). It returns an error wrapping ErrInvalidScope for a nil
+// scope, a negative counter or sum, or a broken invariant, and
+// ErrHistogramConfig for a histogram with another configuration. A valid
+// scope can still fail Add or Merge with ErrOverflow, which only adding
+// detects. Validate never modifies s.
+//
+// A producer can call Validate on each scope it builds before adding or
+// evaluating it, to report the bad scope by name.
+func (s *Scope) Validate() error {
+	if s == nil {
+		return fmt.Errorf("%w: nil scope", ErrInvalidScope)
+	}
+	return s.check()
+}
+
 // Clone returns a deep copy of s: optional counters and histograms are
 // copied, not shared. A distribution with Count 0 and an empty histogram
 // is cloned without one (see the package documentation), so Clone

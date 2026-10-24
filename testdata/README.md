@@ -19,7 +19,9 @@ the v1 engines read and loses nothing on a round trip.
   `header_shadow.json` has `"header": {}` next to `"headers"`;
   `schema_version_number.json` declares `"schema_version": 1`;
   `thresholds_ignored.json` has `thresholds` keys at every level, which
-  v1 readers ignore and the v1 path drops unread.
+  v1 readers ignore and the v1 path drops unread; `checks_ignored.json`
+  does the same for `checks`, `expected_statuses` and the extractor keys
+  `required` and `on_fail`, some of them with values v2 rejects.
 
 Redactions: the presigned storage URL in `compat/constant_csv.node-0.json`
 is replaced with a placeholder URL without a query string (no credential,
@@ -34,10 +36,30 @@ one, contains "secret".
 ## v2
 
 - `valid/`: definitions that both `Parse` and the published schema accept.
+  `checks.json` has every check type and operator, every `on_fail` value
+  and the `""` default, required and optional extractors,
+  `expected_statuses`, keys written with their zero value (`""`, `[]`),
+  `equals: ""`, and label edge cases: `<`, `>`, `&`, `\u` escapes
+  (including U+2028), a 19-digit number, `1.50`, `-1e3`, and two header
+  checks that differ only in value and so need names.
+  `definition/check_fixtures_test.go` checks that every label in it is the
+  same after a marshal and re-parse.
 - `invalid/`: definitions `Parse` rejects, run through the schema as well.
   - `unknown_*`: unknown or v1-only keys added to a valid definition. The
     expected paths are listed in `definition/parse_v2_test.go`.
-  - `type_*`: a value of the wrong JSON type.
+  - `type_*`: a value of the wrong JSON type (or, in
+    `type_check_equals_out_of_range.json`, a number out of float64
+    range).
   - `structure_*`: a structural rule, such as a missing name or load model.
+  - Checks, required extractors and `expected_statuses` have their own
+    families: `structure_check_*`, `type_check_*`, `structure_extract_*`
+    (`on_fail` without `required: true`, or a bad value),
+    `type_extract_*`, `structure_expected_statuses_*` and
+    `type_expected_statuses_*`. Each is a minimal definition with
+    exactly one thing wrong; `checkFixtureProblems` in
+    `definition/check_fixtures_test.go` lists the one problem (path and
+    message) each must produce, and the test fails on a fixture of these
+    families that it does not list. `unknown_check.json` (a check with an
+    unknown key) is an `unknown_*` fixture like the others.
   The schema rejects all of them except the cases listed, with reasons, in
   `knownSchemaLooser` in `definition/schema_test.go`.

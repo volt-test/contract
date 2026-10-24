@@ -13,6 +13,10 @@ var (
 	extractTypes = []string{"json", "regex", "header", "cookie", "html"}
 	dataFormats  = []string{"csv"}
 	dataModes    = []string{"sequential", "random", "unique"}
+	checkTypes   = []string{string(CheckStatus), string(CheckHeader), string(CheckBody), string(CheckJSON),
+		string(CheckHTML), string(CheckTiming), string(CheckURL), string(CheckCookie)}
+	failModes = []string{string(FailRecord), string(FailFail), string(FailAbort)}
+	jsonKinds = []string{"array", "object", "string", "number", "bool", "null"}
 )
 
 // validateV2 checks the structure of a decoded v2 definition. objectForms
@@ -74,6 +78,10 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 		}
 	}
 
+	for i, code := range d.ExpectedStatuses {
+		ps.statusCode(indexPath("expected_statuses", i), code)
+	}
+
 	for i, r := range d.RegionConfig {
 		p := "region_config[" + strconv.Itoa(i) + "]"
 		if strings.TrimSpace(r.Region) == "" {
@@ -117,7 +125,18 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 					ps.add(ep+".selector", "is required")
 				}
 				ps.oneOf(ep+".type", ex.Type, extractTypes)
+				if ex.OnFail != "" {
+					if ex.Required {
+						ps.oneOf(ep+".on_fail", string(ex.OnFail), failModes)
+					} else {
+						ps.add(ep+".on_fail", "only applies with required: true")
+					}
+				}
 			}
+			for k, c := range st.Checks {
+				validateCheck(&ps, sp+".checks["+strconv.Itoa(k)+"]", c)
+			}
+			checkLabels(&ps, sp, st)
 		}
 	}
 	collectBounds(d, &ps, false, false, func(path string, _ ThresholdConfig) bool { return objectForms[path] })

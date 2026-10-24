@@ -129,6 +129,18 @@
 // "p95 == 500ms" and even "p95 <= 500ms" fail on them. Use < or <= with
 // a little headroom for latency, not ==.
 //
+// # Comparisons
+//
+// ParseComparison reads a comparison without a metric, such as "< 500ms",
+// for a single value measured elsewhere: a response time, a body size or
+// a number of items. It takes the kind of the value, which must be a
+// duration, a size or a count, and reads the text exactly as the operator
+// and value of a threshold of that kind: the same operators, value forms,
+// units and canonical Value ("< 500ms" is 500000us, "< 50kb" is 50000
+// bytes). Comparison.Holds applies the same == rule as Evaluate: exact for
+// sizes and counts, with the tolerance above for durations. Rates and
+// throughput have no comparison form.
+//
 // # No data
 //
 // A threshold has status no_data, with a null actual, when there is
