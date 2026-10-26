@@ -20,7 +20,7 @@
             "url",
             "cookie"
           ],
-          "description": "What the check reads: \"status\" (the status code), \"header\", \"body\",\n\"json\" (the body as JSON), \"html\" (the body as HTML), \"timing\", \"url\"\n(the final URL after redirects; the request URL when redirects are\nnot followed) or \"cookie\"."
+          "description": "What the check reads: \"status\" (the status code), \"header\", \"body\",\n\"json\" (the body as JSON), \"html\" (the body as HTML), \"timing\", \"url\"\n(the final URL after redirects; the request URL when redirects are\nnot followed) or \"cookie\". When redirects are followed, status,\nheader, body, json and html read the final response, and cookie\nreads the Set-Cookie headers of the final response and of every\nredirect followed to reach it, a later one winning for the same name."
         },
         "selector": {
           "type": "string",
@@ -101,7 +101,7 @@
         "exists": {
           "type": "boolean",
           "const": true,
-          "description": "header, html, cookie and json: the header, element, cookie or path\nis present. For cookie, it reads the Set-Cookie headers of this\nresponse. Must be true."
+          "description": "header, html, cookie and json: the header, element, cookie or path\nis present. For header, it reads the final response. For cookie, it\nreads the Set-Cookie headers of the response and of every redirect\nfollowed to reach it, a later one winning for the same name. Must be\ntrue."
         },
         "missing": {
           "type": "boolean",
@@ -252,7 +252,7 @@
         "selector": {
           "type": "string",
           "pattern": "\\S",
-          "description": "What to read, by type: a JSON path, a regex, a header name, a cookie\nname or a CSS selector."
+          "description": "What to read, by type: a JSON path, a regex, a header name, a cookie\nname or a CSS selector. When redirects are followed, header, json,\nregex and html read the final response, and cookie reads the\nSet-Cookie headers of the final response and of every redirect\nfollowed to reach it, a later one winning for the same name."
         },
         "attribute": {
           "type": "string",
@@ -267,7 +267,7 @@
             "cookie",
             "html"
           ],
-          "description": "Where to read the value from."
+          "description": "Where to read the value from: the body as JSON (\"json\"), the body\nwith a regex (\"regex\"), a response header (\"header\"), a cookie set\nby the response or by any redirect followed to reach it (\"cookie\"),\nor the body as HTML (\"html\")."
         },
         "required": {
           "type": "boolean",
@@ -298,6 +298,36 @@
         "type"
       ],
       "description": "A value to capture from the response."
+    },
+    "HTTPOptions": {
+      "properties": {
+        "follow_redirects": {
+          "type": "boolean",
+          "description": "Follow redirects (default true). With false, the 3xx response and\nits Location header are what checks and extractors see. Set it to\nfalse to stop following redirects."
+        },
+        "max_redirects": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Most redirects followed for one request (default 10; 0 or absent\nmeans the default). A request that needs more fails. There is no\nupper bound; http_timeout still bounds the whole request, redirects\nincluded."
+        },
+        "version": {
+          "anyOf": [
+            {
+              "enum": [
+                "1.1"
+              ]
+            },
+            {
+              "maxLength": 0
+            }
+          ],
+          "type": "string",
+          "description": "HTTP version: \"1.1\" forces HTTP/1.1. Absent, HTTP/2 is used over TLS\nwhen the server offers it, else HTTP/1.1."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "HTTP client options for every request: redirects and the HTTP version."
     },
     "RegionWeight": {
       "properties": {
@@ -458,6 +488,15 @@
           },
           "type": "array",
           "description": "Pass/fail rules for this step, e.g. \"p99 \u003c 1s\"."
+        },
+        "follow_redirects": {
+          "type": "boolean",
+          "description": "Overrides http.follow_redirects for this step."
+        },
+        "max_redirects": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Overrides http.max_redirects for this step (0 or absent means the\ntest-level value). Only applies when the step follows redirects."
         }
       },
       "additionalProperties": false,
@@ -467,6 +506,46 @@
         "request"
       ],
       "description": "One HTTP request in a scenario."
+    },
+    "TLSOptions": {
+      "properties": {
+        "insecure_skip_verify": {
+          "type": "boolean",
+          "description": "Skip verification of the target's certificate, e.g. for a staging\nserver with a self-signed certificate (default false). When true,\nca_cert is accepted but has no effect: verification is skipped."
+        },
+        "min_version": {
+          "anyOf": [
+            {
+              "enum": [
+                "1.0",
+                "1.1",
+                "1.2",
+                "1.3"
+              ]
+            },
+            {
+              "maxLength": 0
+            }
+          ],
+          "type": "string",
+          "description": "Lowest TLS version to accept: \"1.0\", \"1.1\", \"1.2\" or \"1.3\"\n(default \"1.2\")."
+        },
+        "client_cert": {
+          "type": "string",
+          "description": "Client certificate for mutual TLS: a file path, or inline PEM with\none or more CERTIFICATE blocks. A relative path resolves against the\nworking directory of the process that runs the test; VoltTest Cloud\nruns need the inline form. Requires client_key."
+        },
+        "client_key": {
+          "type": "string",
+          "description": "Private key of client_cert: a file path, or inline PEM with an\nunencrypted private key block. A relative path resolves against the\nworking directory of the process that runs the test; VoltTest Cloud\nruns need the inline form. An inline key is a private key stored\nwith the definition as written; prefer a path for local and CI runs.\nRequires client_cert."
+        },
+        "ca_cert": {
+          "type": "string",
+          "description": "Certificates trusted for the target, in addition to the system\nroots: a file path, or inline PEM with one or more CERTIFICATE\nblocks. A relative path resolves against the working directory of\nthe process that runs the test; VoltTest Cloud runs need the inline\nform."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "TLS options for HTTPS targets: verification, minimum version and client certificates."
     },
     "Target": {
       "properties": {
@@ -645,6 +724,14 @@
       },
       "type": "array",
       "description": "HTTP status codes (100-599) that count as a successful request, for\nsteps without a status check whose on_fail is fail or abort; such a\ncheck decides for its own step instead. Leave it out (or write []) to\nuse the engine's default."
+    },
+    "http": {
+      "$ref": "#/$defs/HTTPOptions",
+      "description": "HTTP options for every request: redirects and the HTTP version."
+    },
+    "tls": {
+      "$ref": "#/$defs/TLSOptions",
+      "description": "TLS options for every request to an https URL."
     }
   },
   "additionalProperties": false,

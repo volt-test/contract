@@ -1,0 +1,23 @@
+{
+  "schema_version": "2.0",
+  "name": "Invalid HTTP and TLS options",
+  "virtual_users": 1,
+  "duration": "30s",
+  "tls": {
+    "client_cert": "certs/client.pem"
+  },
+  "scenarios": [
+    {
+      "name": "Home",
+      "steps": [
+        {
+          "name": "Get home",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/"
+          }
+        }
+      ]
+    }
+  ]
+}

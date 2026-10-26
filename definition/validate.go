@@ -82,6 +82,9 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 		ps.statusCode(indexPath("expected_statuses", i), code)
 	}
 
+	validateHTTPTLS(&ps, d)
+	follows := httpFollows(d)
+
 	for i, r := range d.RegionConfig {
 		p := "region_config[" + strconv.Itoa(i) + "]"
 		if strings.TrimSpace(r.Region) == "" {
@@ -137,6 +140,7 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 				validateCheck(&ps, sp+".checks["+strconv.Itoa(k)+"]", c)
 			}
 			checkLabels(&ps, sp, st)
+			validateStepRedirects(&ps, sp, st, follows)
 		}
 	}
 	collectBounds(d, &ps, false, false, func(path string, _ ThresholdConfig) bool { return objectForms[path] })

@@ -8,6 +8,8 @@ var (
 	CheckTypesForTest       = checkTypes
 	FailModesForTest        = failModes
 	JSONKindsForTest        = jsonKinds
+	HTTPVersionsForTest     = httpVersions
+	TLSVersionsForTest      = tlsVersions
 	MinEngineReleaseForTest = minEngineRelease
 )
 

@@ -21,7 +21,19 @@ the v1 engines read and loses nothing on a round trip.
   `thresholds_ignored.json` has `thresholds` keys at every level, which
   v1 readers ignore and the v1 path drops unread; `checks_ignored.json`
   does the same for `checks`, `expected_statuses` and the extractor keys
-  `required` and `on_fail`, some of them with values v2 rejects.
+  `required` and `on_fail`, some of them with values v2 rejects;
+  `http_tls_ignored.json` does the same for `http`, `tls` and a step's
+  `follow_redirects` and `max_redirects`, with values v2 rejects (a
+  negative `max_redirects`, unknown versions, a key without a
+  certificate, a blank path, a step maximum with following off).
+  `TestV1DropsHTTPTLSKeys` in `definition/v1walk_test.go` checks that it
+  parses the same with those keys removed.
+
+Every `*_ignored.json` fixture keeps the right JSON type for each value:
+`TestV1RewriteMatchesDirectDecode` decodes every v1 fixture with plain
+`encoding/json`, which fails on a mistyped value. Mistyped v2-only keys are
+covered by Go tests instead (`TestV1IgnoresHTTPTLS` in
+`definition/http_tls_fixtures_test.go`).
 
 Redactions: the presigned storage URL in `compat/constant_csv.node-0.json`
 is replaced with a placeholder URL without a query string (no credential,
@@ -44,6 +56,17 @@ one, contains "secret".
   checks that differ only in value and so need names.
   `definition/check_fixtures_test.go` checks that every label in it is the
   same after a marshal and re-parse.
+  `http_tls.json` has every `http` and `tls` key: `follow_redirects: false`
+  with `max_redirects` at the test level, `version: "1.1"`,
+  `insecure_skip_verify`, `min_version: "1.3"`, `client_cert` and `client_key` as file paths, `ca_cert` as
+  an inline placeholder `CERTIFICATE` block, and steps that turn following
+  back on with their own maximum, turn it off, or override nothing.
+  `http_tls_zero.json` writes every `http` and `tls` key that has a zero
+  value meaning absent or default (`""`, `0`, `insecure_skip_verify:
+  false`), and steps with `max_redirects: 0`, one of them next to
+  `follow_redirects: false`. Empty `"http": {}` and
+  `"tls": {}` objects are covered by Go tests (`TestHTTPTLSEmptyObjects`)
+  and a fuzz seed.
 - `invalid/`: definitions `Parse` rejects, run through the schema as well.
   - `unknown_*`: unknown or v1-only keys added to a valid definition. The
     expected paths are listed in `definition/parse_v2_test.go`.
@@ -61,5 +84,31 @@ one, contains "secret".
     message) each must produce, and the test fails on a fixture of these
     families that it does not list. `unknown_check.json` (a check with an
     unknown key) is an `unknown_*` fixture like the others.
+  - The HTTP and TLS options and a step's redirect keys have the families
+    `structure_http_*`, `type_http_*`, `structure_tls_*`, `type_tls_*`,
+    `structure_step_*` and `type_step_*`, built the same way:
+    `httpTLSFixtureProblems` in `definition/http_tls_fixtures_test.go`
+    lists the one problem each must produce, and the test fails on an
+    unlisted fixture of these families. They cover a bad `http.version`
+    or `tls.min_version`, a negative `max_redirects` at either level, a
+    step `max_redirects` with following off on the step or inherited from
+    the test, a key without a certificate and the reverse, inline PEM that
+    is not PEM or holds the wrong block, a blank or multi-line path, and
+    values of the wrong JSON type (`type_http_debug_string.json`, for the
+    top-level `http_debug`, is listed there too).
+    `unknown_http.json` and `unknown_tls.json` (a misspelled key in each
+    object), `unknown_scenario_follow_redirects.json` (no scenario-level
+    setting) and `unknown_request_follow_redirects.json` (the key belongs
+    on the step, not the request) are `unknown_*` fixtures.
   The schema rejects all of them except the cases listed, with reasons, in
   `knownSchemaLooser` in `definition/schema_test.go`.
+
+## Private keys
+
+No fixture, v1 or v2, carries a private key, not even a placeholder:
+secret scanners match the PEM block type whatever the body. `client_key`
+is always a file path in fixtures, and `TestFixturesCarryNoSecrets` in
+`definition/fixtures_test.go` fails if any fixture contains the words of a
+private-key PEM block type, in any case. Inline certificates are
+placeholder `CERTIFICATE` blocks with the body `AAAA`. Go tests that need
+an inline key build its block type at run time.

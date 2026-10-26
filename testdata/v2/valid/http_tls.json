@@ -1,0 +1,49 @@
+{
+  "schema_version": "2.0",
+  "name": "HTTP and TLS options",
+  "virtual_users": 1,
+  "duration": "30s",
+  "http": {
+    "follow_redirects": false,
+    "max_redirects": 5,
+    "version": "1.1"
+  },
+  "tls": {
+    "insecure_skip_verify": true,
+    "min_version": "1.3",
+    "client_cert": "certs/client.pem",
+    "client_key": "certs/client-key.pem",
+    "ca_cert": "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n"
+  },
+  "scenarios": [
+    {
+      "name": "Home",
+      "steps": [
+        {
+          "name": "Login redirect",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/login"
+          },
+          "follow_redirects": true,
+          "max_redirects": 3
+        },
+        {
+          "name": "Old link",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/old"
+          },
+          "follow_redirects": false
+        },
+        {
+          "name": "Home",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/"
+          }
+        }
+      ]
+    }
+  ]
+}

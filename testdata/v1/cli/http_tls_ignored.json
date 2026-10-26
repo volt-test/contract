@@ -1,0 +1,57 @@
+{
+  "name": "v1 definition with http and tls keys",
+  "virtual_users": 2,
+  "duration": "10s",
+  "http_timeout": "5s",
+  "target": {
+    "url": "https://api.example.com"
+  },
+  "http": {
+    "follow_redirects": false,
+    "max_redirects": -1,
+    "version": "3"
+  },
+  "tls": {
+    "insecure_skip_verify": true,
+    "min_version": "9",
+    "client_key": "certs/client-key.pem",
+    "ca_cert": "   "
+  },
+  "scenarios": [
+    {
+      "name": "Read",
+      "weight": 1,
+      "steps": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "url": "https://api.example.com/login",
+            "body": "{}",
+            "header": {
+              "Content-Type": "application/json"
+            }
+          },
+          "follow_redirects": false,
+          "max_redirects": 3
+        },
+        {
+          "name": "Items",
+          "request": {
+            "method": "GET",
+            "url": "https://api.example.com/items"
+          },
+          "follow_redirects": true,
+          "max_redirects": -4,
+          "validate": [
+            {
+              "name": "status",
+              "type": "status",
+              "expected": 302
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
