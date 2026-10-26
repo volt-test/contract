@@ -77,6 +77,8 @@ func generateSchema(t *testing.T) []byte {
 		"Extract":      "A value to capture from the response.",
 		"Check":        "An assertion on the response: a type, a selector where the type needs one, and exactly one operator.",
 		"Threshold":    "A pass/fail rule: an expression such as \"p95 < 500ms\", or an object with the expression and abort settings.",
+		"HTTPOptions":  "HTTP client options for every request: redirects and the HTTP version.",
+		"TLSOptions":   "TLS options for HTTPS targets: verification, minimum version and client certificates.",
 	}
 	for name, def := range s.Definitions {
 		desc, ok := typeDescriptions[name]
@@ -171,6 +173,12 @@ func checkSchemaRules(t *testing.T, s *jsonschema.Schema) {
 			{Required: []string{"required"}, Properties: needRequired},
 		}},
 	}
+	// http.version and tls.min_version read "" as absent. The other rules
+	// on http, tls and the step redirect keys (cert and key together, PEM
+	// contents, max_redirects only where redirects are followed) are
+	// Parse's alone; see knownSchemaLooser.
+	optionalEnum(prop(s.Definitions["HTTPOptions"], "version"), definition.HTTPVersionsForTest)
+	optionalEnum(prop(s.Definitions["TLSOptions"], "min_version"), definition.TLSVersionsForTest)
 }
 
 // thresholdSchema describes a threshold: the expression string, or the
@@ -293,6 +301,15 @@ var knownSchemaLooser = map[string]string{
 	"structure_check_label_cut_collision.json":        "check labels must be unique in a step, after the cut to 128 bytes",
 	"structure_check_duplicate_required_extract.json": "a required extractor's label, extract <variable_name>, must be unique in a step",
 	"type_check_equals_out_of_range.json":             "JSON Schema numbers have no range; Parse rejects equals and contains outside float64 range",
+
+	"structure_step_max_redirects_not_followed.json": "max_redirects needs redirects followed for the step, a rule across the test and step levels",
+	"structure_step_max_redirects_inherits_off.json": "max_redirects needs redirects followed for the step, a rule across the test and step levels",
+	"structure_tls_key_without_cert.json":            "client_cert and client_key go together, and \"\" counts as absent",
+	"structure_tls_cert_without_key.json":            "client_cert and client_key go together, and \"\" counts as absent",
+	"structure_tls_cert_not_pem.json":                "PEM contents are plain strings in the schema",
+	"structure_tls_ca_wrong_block.json":              "PEM contents are plain strings in the schema",
+	"structure_tls_blank_path.json":                  "optional keys take no pattern; a blank path is a Parse rule",
+	"structure_tls_path_with_newline.json":           "optional keys take no pattern; a line break in a path is a Parse rule",
 }
 
 // TestSchemaAgreesWithParse checks that the schema and Parse agree on
@@ -497,8 +514,89 @@ func TestSchemaShape(t *testing.T) {
 	if got, want := optionalEnum("Extract", "on_fail"), sorted(definition.FailModesForTest); !reflect.DeepEqual(got, want) {
 		t.Errorf("schema extract on_fail %q != Parse %q", got, want)
 	}
+	if got, want := optionalEnum("HTTPOptions", "version"), sorted(definition.HTTPVersionsForTest); !reflect.DeepEqual(got, want) {
+		t.Errorf("schema http version %q != Parse %q", got, want)
+	}
+	if got, want := optionalEnum("TLSOptions", "min_version"), sorted(definition.TLSVersionsForTest); !reflect.DeepEqual(got, want) {
+		t.Errorf("schema tls min_version %q != Parse %q", got, want)
+	}
 
 	checkShape(t, props, defs)
+	httpTLSShape(t, props, defs)
+}
+
+// httpTLSShape pins the schema of the http and tls objects and the step
+// redirect keys.
+func httpTLSShape(t *testing.T, props, defs map[string]any) {
+	t.Helper()
+	obj := func(v any) map[string]any { m, _ := v.(map[string]any); return m }
+	keys := func(m map[string]any) []string {
+		var out []string
+		for k := range m {
+			out = append(out, k)
+		}
+		sort.Strings(out)
+		return out
+	}
+	for k, ref := range map[string]string{"http": "#/$defs/HTTPOptions", "tls": "#/$defs/TLSOptions"} {
+		if got := obj(props[k])["$ref"]; got != ref {
+			t.Errorf("%s $ref = %v, want %s", k, got, ref)
+		}
+	}
+	httpDef, tlsDef := obj(defs["HTTPOptions"]), obj(defs["TLSOptions"])
+	hp, tp := obj(httpDef["properties"]), obj(tlsDef["properties"])
+	if got, want := keys(hp), []string{"follow_redirects", "max_redirects", "version"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("http keys = %q, want %q", got, want)
+	}
+	if got, want := keys(tp), []string{"ca_cert", "client_cert", "client_key", "insecure_skip_verify", "min_version"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("tls keys = %q, want %q", got, want)
+	}
+	for name, def := range map[string]map[string]any{"HTTPOptions": httpDef, "TLSOptions": tlsDef} {
+		if _, ok := def["required"]; ok {
+			t.Errorf("$defs.%s has required keys; every key is optional", name)
+		}
+		if _, ok := def["dependentSchemas"]; ok {
+			t.Errorf("$defs.%s has dependentSchemas; \"\" reads as absent, so pairing is Parse's rule", name)
+		}
+	}
+	for _, k := range []string{"client_cert", "client_key", "ca_cert"} {
+		if p := obj(tp[k]); p["type"] != "string" || len(p) != 2 {
+			t.Errorf("tls %s = %v, want a plain string with a description", k, p)
+		}
+	}
+	if p := obj(tp["insecure_skip_verify"]); p["type"] != "boolean" {
+		t.Errorf("tls insecure_skip_verify = %v", p)
+	}
+	sp := obj(obj(defs["Step"])["properties"])
+	for at, p := range map[string]map[string]any{"http": hp, "step": sp} {
+		if f := obj(p["follow_redirects"]); f["type"] != "boolean" || f["const"] != nil {
+			t.Errorf("%s follow_redirects = %v, want a boolean (false is meaningful)", at, f)
+		}
+		if m := obj(p["max_redirects"]); m["type"] != "integer" || m["minimum"] != 0.0 || m["maximum"] != nil {
+			t.Errorf("%s max_redirects = %v, want an integer, minimum 0, no maximum", at, m)
+		}
+	}
+	// Optional keys read "" as absent, so none may demand content.
+	opt := map[string]any{"step.follow_redirects": sp["follow_redirects"], "step.max_redirects": sp["max_redirects"]}
+	for k, v := range hp {
+		opt["http."+k] = v
+	}
+	for k, v := range tp {
+		opt["tls."+k] = v
+	}
+	for k, v := range opt {
+		for _, rule := range []string{"pattern", "minLength", "minItems"} {
+			if _, ok := obj(v)[rule]; ok {
+				t.Errorf("%s has %s; a zero value must stay valid", k, rule)
+			}
+		}
+	}
+	if sc := obj(obj(defs["Scenario"])["properties"]); sc["follow_redirects"] != nil || sc["max_redirects"] != nil {
+		t.Error("scenarios have redirect keys; there is no scenario level")
+	}
+	if req := obj(obj(defs["Request"])["properties"]); req["follow_redirects"] != nil || req["max_redirects"] != nil {
+		t.Error("requests have redirect keys; they belong on the step")
+	}
 }
 
 // checkShape pins the schema of checks, required extractors and

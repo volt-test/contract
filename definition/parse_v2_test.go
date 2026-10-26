@@ -29,24 +29,28 @@ func TestV2ValidFixtures(t *testing.T) {
 // unknownFixtures maps each testdata/v2/invalid/unknown_* file to the paths
 // Parse must report.
 var unknownFixtures = map[string][]string{
-	"unknown_top.json":                    {"retries"},
-	"unknown_target.json":                 {"target.timeout"},
-	"unknown_scenario.json":               {"scenarios[1].iterations"},
-	"unknown_step.json":                   {"scenarios[0].steps[2].assertions"},
-	"unknown_request.json":                {"scenarios[1].steps[0].request.retries"},
-	"unknown_extract.json":                {"scenarios[0].steps[1].extract[1].default"},
-	"unknown_data_config.json":            {"scenarios[0].data_config.delimiter"},
-	"unknown_stage.json":                  {"stages[1].ramp"},
-	"unknown_region_config.json":          {"region_config[0].zone"},
-	"unknown_case_name.json":              {"Name"},
-	"unknown_case_headers.json":           {"scenarios[0].steps[0].request.Headers"},
-	"unknown_v1_validate.json":            {"scenarios[0].steps[0].validate"},
-	"unknown_v1_header.json":              {"scenarios[0].steps[1].request.header"},
-	"unknown_v1_weights_report_type.json": {"report_type", "weights"},
-	"unknown_v1_cli_keys.json":            {"api_key", "cloud", "cloud_timeout", "existing_test_id", "skip_lookup"},
-	"unknown_multiple.json":               {"alpha", "scenarios[0].steps[0].think", "scenarios[1].steps[0].request.retries", "target.proxy", "zeta"},
-	"unknown_threshold_key.json":          {"thresholds[1].abort_on_fial"},
-	"unknown_check.json":                  {"scenarios[0].steps[0].checks[0].operator"},
+	"unknown_top.json":                       {"retries"},
+	"unknown_target.json":                    {"target.timeout"},
+	"unknown_scenario.json":                  {"scenarios[1].iterations"},
+	"unknown_step.json":                      {"scenarios[0].steps[2].assertions"},
+	"unknown_request.json":                   {"scenarios[1].steps[0].request.retries"},
+	"unknown_extract.json":                   {"scenarios[0].steps[1].extract[1].default"},
+	"unknown_data_config.json":               {"scenarios[0].data_config.delimiter"},
+	"unknown_stage.json":                     {"stages[1].ramp"},
+	"unknown_region_config.json":             {"region_config[0].zone"},
+	"unknown_case_name.json":                 {"Name"},
+	"unknown_case_headers.json":              {"scenarios[0].steps[0].request.Headers"},
+	"unknown_v1_validate.json":               {"scenarios[0].steps[0].validate"},
+	"unknown_v1_header.json":                 {"scenarios[0].steps[1].request.header"},
+	"unknown_v1_weights_report_type.json":    {"report_type", "weights"},
+	"unknown_v1_cli_keys.json":               {"api_key", "cloud", "cloud_timeout", "existing_test_id", "skip_lookup"},
+	"unknown_multiple.json":                  {"alpha", "scenarios[0].steps[0].think", "scenarios[1].steps[0].request.retries", "target.proxy", "zeta"},
+	"unknown_threshold_key.json":             {"thresholds[1].abort_on_fial"},
+	"unknown_check.json":                     {"scenarios[0].steps[0].checks[0].operator"},
+	"unknown_http.json":                      {"http.follow_redirect"},
+	"unknown_tls.json":                       {"tls.verify"},
+	"unknown_scenario_follow_redirects.json": {"scenarios[0].follow_redirects"},
+	"unknown_request_follow_redirects.json":  {"scenarios[0].steps[0].request.follow_redirects"},
 }
 
 func TestV2UnknownFields(t *testing.T) {
@@ -548,7 +552,9 @@ func TestV2RoundTrip(t *testing.T) {
 	}
 
 	// A definition built in Go, with no empty collections, survives exactly.
+	// An explicit follow_redirects: false stays apart from absent.
 	v := definition.V2_0
+	no, yes := false, true
 	want := &definition.Definition{
 		SchemaVersion: &v,
 		Name:          "built",
@@ -559,14 +565,20 @@ func TestV2RoundTrip(t *testing.T) {
 		Target:        &definition.Target{URL: "https://a", IdleTimeout: "1m", BaseURL: "${base}"},
 		RegionConfig:  []definition.RegionWeight{{Region: "us", Weight: 2}},
 		Thresholds:    []definition.ThresholdConfig{{Expr: "p95 < 1s"}, {Expr: "error_rate < 1%", AbortOnFail: true, DelayAbort: "10s"}},
+		HTTP:          &definition.HTTPOptions{FollowRedirects: &no, MaxRedirects: 4, Version: "1.1"},
+		TLS: &definition.TLSOptions{InsecureSkipVerify: true, MinVersion: "1.3", ClientCert: "certs/client.pem",
+			ClientKey: "certs/client-key.pem", CACert: "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n"},
 		Scenarios: []definition.Scenario{{
 			Name: "s", Description: "x", Weight: 3, ThinkTime: "1s", AutoHandleCookies: true,
 			Thresholds: []definition.ThresholdConfig{{Expr: "iterations > 1", AbortOnFail: true}},
 			DataConfig: &definition.DataConfig{DataSource: "a.csv", DataContent: "YQ==", DataFormat: "csv", HasHeader: true, Mode: "unique"},
 			Steps: []definition.Step{{
 				Name: "a", ThinkTime: "1ms", Thresholds: []definition.ThresholdConfig{{Expr: "ttfb_p99.9 <= 50ms"}},
-				Request: definition.Request{Method: "POST", URL: "/a", Body: "{}", Headers: map[string]string{"A": "b"}},
-				Extract: []definition.Extract{{VariableName: "v", Selector: "p", Attribute: "href", Type: "html"}},
+				Request:         definition.Request{Method: "POST", URL: "/a", Body: "{}", Headers: map[string]string{"A": "b"}},
+				Extract:         []definition.Extract{{VariableName: "v", Selector: "p", Attribute: "href", Type: "html"}},
+				FollowRedirects: &yes, MaxRedirects: 2,
+			}, {
+				Name: "b", Request: definition.Request{Method: "GET", URL: "/b"}, FollowRedirects: &no,
 			}},
 		}},
 	}

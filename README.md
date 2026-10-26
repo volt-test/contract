@@ -29,8 +29,10 @@ v2 and later definitions carry `schema_version` as a `"MAJOR.MINOR"` string.
 - Missing, `null`, `1`, `"1"` or `"1.0"` means v1.
 - v2 is `"2.0"`. It is a preview until SDK 2.0.0 ships: fields may still
   join `"2.0"` until then. After that, each new definition field bumps the
-  minor. [Checks](#checks), `expected_statuses` and the extractor keys
-  `required` and `on_fail` joined `"2.0"` under this rule.
+  minor. [Checks](#checks), `expected_statuses`, the extractor keys
+  `required` and `on_fail`, and the [HTTP and TLS
+  options](#http-and-tls-options) (`http`, `tls` and a step's
+  `follow_redirects` and `max_redirects`) joined `"2.0"` under this rule.
 - A reader rejects an unknown major, or a minor newer than it supports.
 
 The module version and `schema_version` move independently: schema `"2.0"`
@@ -58,12 +60,19 @@ does not mean module v2.
   - checks: a known type, exactly one operator that the type takes, a
     selector when the type needs one, values of the right kind, status
     codes from 100 to 599, and a unique label per step (see
-    [Checks](#checks)).
+    [Checks](#checks));
+  - HTTP and TLS options: `http.version` and `tls.min_version` from their
+    lists, `max_redirects` not negative and set on a step only when that
+    step follows redirects, `client_cert` and `client_key` given together,
+    inline PEM holding complete blocks of the right kind, and no blank or
+    multi-line file path (see [HTTP and TLS
+    options](#http-and-tls-options)).
 - **v1** is read the way the v1 readers (the CLI, the cloud engine and the
   backend) read it. Unknown keys are ignored, keys match case-insensitively,
   and v2-only keys (`target.base_url`, `thresholds` at every level,
-  `expected_statuses`, a step's `checks`, and an extractor's `required` and
-  `on_fail`) are dropped unread, whatever their value. Values are
+  `expected_statuses`, `http`, `tls`, a step's `checks`,
+  `follow_redirects` and `max_redirects`, and an extractor's `required`
+  and `on_fail`) are dropped unread, whatever their value. Values are
   checked for their JSON type only:
   - **core** fields, which every v1 reader decodes: a value of the wrong
     type fails `Parse`, as it fails every reader;
@@ -126,7 +135,11 @@ expressions and their scopes (the schema only requires a non-empty string),
 and the check rules the schema cannot express: one operator per check and
 only the operators its type takes, selectors, the value kind per type,
 regular expressions, comparisons, `between` order and unique check
-labels.
+labels. For the HTTP and TLS options it also checks the rules that span
+keys or levels (a step's `max_redirects` against the `follow_redirects`
+in effect for it, `client_cert` and `client_key` together), the PEM
+contents of `client_cert`, `client_key` and `ca_cert`, and blank or
+multi-line file paths.
 
 ### Error size
 
@@ -271,9 +284,11 @@ optional `name` and `on_fail`.
   metric; `thresholds.ParseComparison` reads them.
 - `is` is one of `array`, `object`, `string`, `number`, `bool`, `null`.
 - `header` names are case-insensitive; when a header repeats, any of its
-  values may match. `cookie` reads the `Set-Cookie` headers of this
-  response. `url` is the final URL after redirects (the request URL when
-  redirects are not followed).
+  values may match. `cookie` reads the `Set-Cookie` headers of the
+  response and of every redirect followed to reach it, a later one
+  winning for the same name. `url` is the final URL after redirects (the
+  request URL when redirects are not followed). See [Redirects and
+  checks](#redirects-and-checks).
 - On `json`, `equals` compares scalars only (an object or array never
   equals), `count` applies to arrays, `matches` to strings and `contains`
   to arrays; any other JSON kind at the path fails the check. A number
@@ -393,6 +408,113 @@ the test, step names in their scenario, labels in their step), so a label
 alone is not: steps in different scenarios can share one. Results also
 carry the check's `type`, which describes the check and is not part of
 the key.
+
+## HTTP and TLS options
+
+A v2 definition can carry `http` and `tls` objects at the top level. Both
+are optional, every key in them is optional, and `{}` changes nothing.
+`""` and `0` count as absent; `insecure_skip_verify: false` is its
+default. `follow_redirects: false` is a value, not absent: it is kept and
+turns following off.
+
+```json
+"http": {"follow_redirects": true, "max_redirects": 5, "version": "1.1"},
+"tls": {
+  "min_version": "1.2",
+  "client_cert": "certs/client.pem",
+  "client_key": "certs/client-key.pem",
+  "ca_cert": "certs/staging-ca.pem"
+}
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `http.follow_redirects` | `true` | Follow 3xx redirects. |
+| `http.max_redirects` | `10` | Most redirects followed for one request; a request that needs more fails. `0` means the default. |
+| `http.version` | negotiated | `"1.1"` forces HTTP/1.1. Absent, HTTP/2 is used over TLS when the server offers it, else HTTP/1.1. `"1.1"` is the only value. |
+| `tls.insecure_skip_verify` | `false` | Skip verification of the target's certificate, e.g. a staging server with a self-signed certificate. |
+| `tls.min_version` | `"1.2"` | Lowest TLS version accepted: `"1.0"`, `"1.1"`, `"1.2"` or `"1.3"`. The old versions are there to test legacy targets. |
+| `tls.client_cert` | none | Client certificate for mutual TLS: one or more `CERTIFICATE` blocks. Requires `client_key`. |
+| `tls.client_key` | none | The client certificate's private key, unencrypted. Requires `client_cert`. |
+| `tls.ca_cert` | none | Certificates trusted for the target in addition to the system roots: one or more `CERTIFICATE` blocks. |
+
+`http_timeout` and `http_debug` stay at the top level; there is no
+`http.timeout` or `http.debug`.
+
+These keys joined `"2.0"` while it is a preview (see
+[schema_version](#schema_version)). v1 definitions drop them unread.
+
+### Redirects
+
+A step can override the test-level values with its own `follow_redirects`
+and `max_redirects`. There is no scenario-level setting, and a request
+object takes neither key.
+
+```json
+{
+  "name": "Old link",
+  "request": {"method": "GET", "url": "/old"},
+  "follow_redirects": false,
+  "checks": [{"type": "status", "in": [301]}]
+}
+```
+
+- Turn following off with `follow_redirects: false`. `max_redirects: 0`
+  means absent, not "no redirects": the default of 10 at the test level,
+  and the test-level maximum (else 10) on a step. A negative value is
+  rejected.
+- Whether a step follows redirects comes from its own
+  `follow_redirects`, else `http.follow_redirects`, else the default
+  (`true`). A step's
+  `max_redirects` (above 0) is rejected when that step does not follow
+  redirects. At the test level, `follow_redirects: false` with
+  `max_redirects` is allowed: steps that set `follow_redirects: true`
+  use that maximum.
+- `max_redirects` has no upper limit. `http_timeout` bounds the whole
+  request, redirects included.
+
+### Redirects and checks
+
+With redirects followed:
+
+- `status`, `header`, `body`, `json` and `html` checks, and `header`,
+  `json`, `regex` and `html` extractors, read the final response;
+- `url` is the final URL;
+- `cookie` checks and extractors read the `Set-Cookie` headers of the
+  final response and of every redirect followed to reach it, a later one
+  winning for the same name. A login that sets a session cookie on its
+  302 still passes a `cookie` check.
+
+With redirects not followed, checks and extractors see the 3xx response
+itself: its status, its headers (the `Location` header included) and its
+body, and `url` is the request URL.
+
+### Certificates and keys
+
+`client_cert`, `client_key` and `ca_cert` each take a file path or inline
+PEM under the same key:
+
+- A value is inline PEM when it contains `-----BEGIN` anywhere; any
+  other value is a file path. `definition.IsInlinePEM` is this rule, so
+  every reader tells the two forms apart the same way. A path must not
+  be blank or contain a line break.
+- Text before the first PEM block, such as comment lines, is allowed,
+  but each block's `-----BEGIN` must be at the start of a line.
+- Inline PEM must hold at least one complete block of the right kind:
+  `CERTIFICATE` blocks, and no private key, for `client_cert` and
+  `ca_cert`; a private key block for `client_key`. Encrypted private keys
+  are not supported: there is no passphrase key. `Parse` checks the PEM
+  structure only; the certificate and key are loaded, and matched, when
+  the run starts.
+- A path is a file on the machine that runs the test. A relative path
+  resolves against the working directory of the process that runs the
+  test, not the definition's directory: a definition can arrive on
+  standard input and have none. VoltTest Cloud runs need the inline form.
+- An inline `client_key` is stored with the definition as written, like
+  every other value. Prefer a path for local and CI runs.
+- With `insecure_skip_verify: true`, `ca_cert` is accepted but has no
+  effect: verification is skipped.
+- `Parse` errors for these three keys never repeat the value.
 
 ## Compatibility
 

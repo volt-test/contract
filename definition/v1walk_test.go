@@ -90,6 +90,10 @@ var v1ReadSet = map[string]string{
 	"scenarios[].steps[].extract[].required": "v2",
 	"scenarios[].steps[].extract[].on_fail":  "v2",
 	"expected_statuses":                      "v2",
+	"http":                                   "v2",
+	"tls":                                    "v2",
+	"scenarios[].steps[].follow_redirects":   "v2",
+	"scenarios[].steps[].max_redirects":      "v2",
 }
 
 type classified struct {
@@ -670,5 +674,49 @@ func TestV1DropsCheckKeys(t *testing.T) {
 	}
 	if got.ExpectedStatuses != nil {
 		t.Error("expected_statuses kept")
+	}
+}
+
+// TestV1DropsHTTPTLSKeys checks that http_tls_ignored.json, a v1
+// definition carrying the v2 http, tls and step redirect keys (with values
+// v2 rejects), parses exactly as it does without them. TestV1IgnoresHTTPTLS
+// covers keys of the wrong JSON type.
+func TestV1DropsHTTPTLSKeys(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "testdata", "v1", "cli", "http_tls_ignored.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stripped := withoutV2OnlyKeys(t, raw)
+	for _, k := range []string{`"http"`, `"tls"`, `"follow_redirects"`, `"max_redirects"`} {
+		if !bytes.Contains(raw, []byte(k)) || bytes.Contains(stripped, []byte(k)) {
+			t.Fatalf("the fixture's %s key was not removed: %s", k, stripped)
+		}
+	}
+	want, err := Parse(stripped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.IsV1() || len(got.V1TypeProblems) != 0 {
+		t.Errorf("IsV1 %v, V1TypeProblems %v", got.IsV1(), got.V1TypeProblems)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("v1 with http and tls keys:\n got %+v\nwant %+v", got, want)
+	}
+	if got.HTTP != nil || got.TLS != nil {
+		t.Errorf("HTTP %+v, TLS %+v kept", got.HTTP, got.TLS)
+	}
+	for _, sc := range got.Scenarios {
+		for _, st := range sc.Steps {
+			if st.FollowRedirects != nil || st.MaxRedirects != 0 {
+				t.Errorf("step %s kept follow_redirects/max_redirects", st.Name)
+			}
+		}
+	}
+	if got.HTTPTimeout != "5s" {
+		t.Errorf("http_timeout = %q; a key next to http must still be read", got.HTTPTimeout)
 	}
 }

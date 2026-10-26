@@ -72,6 +72,10 @@ type Definition struct {
 	// check decides for its own step instead. Leave it out (or write []) to
 	// use the engine's default.
 	ExpectedStatuses []int `json:"expected_statuses,omitempty" contract:"v2"`
+	// HTTP options for every request: redirects and the HTTP version.
+	HTTP *HTTPOptions `json:"http,omitempty" contract:"v2"`
+	// TLS options for every request to an https URL.
+	TLS *TLSOptions `json:"tls,omitempty" contract:"v2"`
 
 	// Weights repeats the scenario weights (v1 only).
 	Weights []int `json:"weights,omitempty" contract:"v1,loose" jsonschema:"-"`
@@ -148,6 +152,59 @@ func (Secret) GoString() string { return redacted }
 
 // MarshalJSON writes "[redacted]".
 func (Secret) MarshalJSON() ([]byte, error) { return []byte(`"` + redacted + `"`), nil }
+
+// HTTPOptions are the test-level HTTP options. A step can override the
+// redirect options with its own follow_redirects and max_redirects.
+type HTTPOptions struct {
+	// Follow redirects (default true). With false, the 3xx response and
+	// its Location header are what checks and extractors see. Set it to
+	// false to stop following redirects.
+	FollowRedirects *bool `json:"follow_redirects,omitempty"`
+	// Most redirects followed for one request (default 10; 0 or absent
+	// means the default). A request that needs more fails. There is no
+	// upper bound; http_timeout still bounds the whole request, redirects
+	// included.
+	MaxRedirects int `json:"max_redirects,omitempty" jsonschema:"minimum=0"`
+	// HTTP version: "1.1" forces HTTP/1.1. Absent, HTTP/2 is used over TLS
+	// when the server offers it, else HTTP/1.1.
+	Version string `json:"version,omitempty"`
+}
+
+// TLSOptions are the TLS options for requests to https URLs.
+//
+// client_cert, client_key and ca_cert each take a file path on the machine
+// that runs the test, or inline PEM: a value that contains a -----BEGIN
+// line. A relative path resolves against the working
+// directory of the process that runs the test (a definition may arrive on
+// standard input, so there is no definition directory). VoltTest Cloud
+// runs need the inline form.
+type TLSOptions struct {
+	// Skip verification of the target's certificate, e.g. for a staging
+	// server with a self-signed certificate (default false). When true,
+	// ca_cert is accepted but has no effect: verification is skipped.
+	InsecureSkipVerify bool `json:"insecure_skip_verify,omitempty"`
+	// Lowest TLS version to accept: "1.0", "1.1", "1.2" or "1.3"
+	// (default "1.2").
+	MinVersion string `json:"min_version,omitempty"`
+	// Client certificate for mutual TLS: a file path, or inline PEM with
+	// one or more CERTIFICATE blocks. A relative path resolves against the
+	// working directory of the process that runs the test; VoltTest Cloud
+	// runs need the inline form. Requires client_key.
+	ClientCert string `json:"client_cert,omitempty"`
+	// Private key of client_cert: a file path, or inline PEM with an
+	// unencrypted private key block. A relative path resolves against the
+	// working directory of the process that runs the test; VoltTest Cloud
+	// runs need the inline form. An inline key is a private key stored
+	// with the definition as written; prefer a path for local and CI runs.
+	// Requires client_cert.
+	ClientKey string `json:"client_key,omitempty"`
+	// Certificates trusted for the target, in addition to the system
+	// roots: a file path, or inline PEM with one or more CERTIFICATE
+	// blocks. A relative path resolves against the working directory of
+	// the process that runs the test; VoltTest Cloud runs need the inline
+	// form.
+	CACert string `json:"ca_cert,omitempty"`
+}
 
 // Stage is one step of a staged load profile.
 type Stage struct {
@@ -233,6 +290,11 @@ type Step struct {
 	ThinkTime string `json:"think_time,omitempty"`
 	// Pass/fail rules for this step, e.g. "p99 < 1s".
 	Thresholds []ThresholdConfig `json:"thresholds,omitempty" contract:"v2"`
+	// Overrides http.follow_redirects for this step.
+	FollowRedirects *bool `json:"follow_redirects,omitempty" contract:"v2"`
+	// Overrides http.max_redirects for this step (0 or absent means the
+	// test-level value). Only applies when the step follows redirects.
+	MaxRedirects int `json:"max_redirects,omitempty" contract:"v2" jsonschema:"minimum=0"`
 }
 
 // Request is an HTTP request template. URL, Body and header values may
@@ -276,11 +338,17 @@ type Extract struct {
 	// Name of the variable that receives the value.
 	VariableName string `json:"variable_name" jsonschema:"required,pattern=\\S"`
 	// What to read, by type: a JSON path, a regex, a header name, a cookie
-	// name or a CSS selector.
+	// name or a CSS selector. When redirects are followed, header, json,
+	// regex and html read the final response, and cookie reads the
+	// Set-Cookie headers of the final response and of every redirect
+	// followed to reach it, a later one winning for the same name.
 	Selector string `json:"selector" jsonschema:"required,pattern=\\S"`
 	// HTML attribute to read, for type html.
 	Attribute string `json:"attribute,omitempty"`
-	// Where to read the value from.
+	// Where to read the value from: the body as JSON ("json"), the body
+	// with a regex ("regex"), a response header ("header"), a cookie set
+	// by the response or by any redirect followed to reach it ("cookie"),
+	// or the body as HTML ("html").
 	Type string `json:"type" jsonschema:"required,enum=json,enum=regex,enum=header,enum=cookie,enum=html"`
 	// Treat a miss (nothing found) as a failed check labelled
 	// "extract <variable_name>". Required or not, an extractor always
@@ -309,7 +377,10 @@ type Check struct {
 	// What the check reads: "status" (the status code), "header", "body",
 	// "json" (the body as JSON), "html" (the body as HTML), "timing", "url"
 	// (the final URL after redirects; the request URL when redirects are
-	// not followed) or "cookie".
+	// not followed) or "cookie". When redirects are followed, status,
+	// header, body, json and html read the final response, and cookie
+	// reads the Set-Cookie headers of the final response and of every
+	// redirect followed to reach it, a later one winning for the same name.
 	Type CheckType `json:"type" jsonschema:"required,enum=status,enum=header,enum=body,enum=json,enum=html,enum=timing,enum=url,enum=cookie"`
 	// What to read, by type: the header name for header (case-insensitive;
 	// when the header repeats, any of its values may match), a JSON path
@@ -345,8 +416,10 @@ type Check struct {
 	// other JSON kind fails the check.
 	Matches string `json:"matches,omitempty"`
 	// header, html, cookie and json: the header, element, cookie or path
-	// is present. For cookie, it reads the Set-Cookie headers of this
-	// response. Must be true.
+	// is present. For header, it reads the final response. For cookie, it
+	// reads the Set-Cookie headers of the response and of every redirect
+	// followed to reach it, a later one winning for the same name. Must be
+	// true.
 	Exists *bool `json:"exists,omitempty"`
 	// json: the path is absent. Must be true.
 	Missing *bool `json:"missing,omitempty"`

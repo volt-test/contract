@@ -16,9 +16,10 @@
 // A v1 definition (no schema_version, or 1, "1", "1.0" or null) is read the
 // way the v1 readers read it: unknown keys are ignored, keys match
 // case-insensitively, and v2-only keys (contract:"v2", such as
-// target.base_url, thresholds, expected_statuses, a step's checks and an
-// extractor's required and on_fail) are dropped unread. Values are checked for their JSON
-// type only, with two classes of field:
+// target.base_url, thresholds, expected_statuses, http, tls, a step's
+// checks, follow_redirects and max_redirects, and an extractor's required
+// and on_fail) are dropped unread. Values are checked for their JSON type
+// only, with two classes of field:
 //
 //   - Core fields are decoded by every v1 reader (the headless CLI, the
 //     cloud engine and the backend), all of which reject a value of the
@@ -78,7 +79,11 @@
 // threshold expressions and their scopes, and the check rules the schema
 // cannot express: one operator per check and only those its type takes,
 // selectors, the value kind per type, regular expressions, comparisons,
-// between order and unique check labels.
+// between order and unique check labels. For the HTTP and TLS options it
+// also checks a step's max_redirects against the follow_redirects in
+// effect for it, that client_cert and client_key come together, the PEM
+// contents of client_cert, client_key and ca_cert, and blank or
+// multi-line file paths.
 //
 // # Thresholds (v2)
 //
@@ -118,7 +123,10 @@
 // duration are comparisons such as "< 500ms", read by
 // thresholds.ParseComparison with the threshold grammar and units. A
 // number outside float64 range, such as 1e999, is rejected. url is the
-// final URL after redirects. html equals compares the text content of the
+// final URL after redirects (the request URL when redirects are not
+// followed), and cookie reads the Set-Cookie headers of the response and
+// of every redirect followed to reach it, a later one winning for the same
+// name. html equals compares the text content of the
 // first matching element, trimmed of leading and trailing white space, as
 // an html extractor without an attribute reads it. Check values and
 // selectors are literal: ${variable} is not replaced. When no response is
@@ -164,6 +172,54 @@
 //
 // Checks, expected_statuses and the extractor keys required and on_fail
 // joined schema_version "2.0" while it is a preview.
+//
+// # HTTP and TLS options (v2)
+//
+// Definition.HTTP (HTTPOptions) and Definition.TLS (TLSOptions) are
+// optional. "" and 0 count as absent; follow_redirects is a *bool, so an
+// explicit false is a value and is kept:
+//
+//	key                       default     meaning
+//	http.follow_redirects     true        follow 3xx redirects
+//	http.max_redirects        10          most redirects per request; 0 means the default
+//	http.version              negotiated  "1.1" forces HTTP/1.1; absent, HTTP/2 over TLS when offered
+//	tls.insecure_skip_verify  false       skip verification of the target's certificate
+//	tls.min_version           "1.2"       "1.0", "1.1", "1.2" or "1.3"
+//	tls.client_cert           none        client certificate; requires client_key
+//	tls.client_key            none        its unencrypted private key; requires client_cert
+//	tls.ca_cert               none        certificates trusted in addition to the system roots
+//
+// A Step overrides the redirect options with FollowRedirects and
+// MaxRedirects; there is no scenario-level setting. Following is turned off
+// only with follow_redirects: false; max_redirects 0 means absent (10 at
+// the test level, the test-level maximum on a step), and a negative value
+// is rejected. A step's max_redirects above 0 is rejected
+// when the step does not follow redirects (its own follow_redirects, else
+// http.follow_redirects, else true). max_redirects has no upper limit:
+// http_timeout bounds the whole request, redirects included. http_timeout
+// and http_debug stay at the top level.
+//
+// With redirects followed, checks and extractors read the final response
+// and url is the final URL; cookie checks and extractors read the
+// Set-Cookie headers of every redirect followed as well, a later one
+// winning for the same name. With redirects not followed, they see the 3xx
+// response, its Location header included, and url is the request URL.
+//
+// client_cert, client_key and ca_cert each take a file path or inline PEM.
+// IsInlinePEM is the rule: a value that contains "-----BEGIN" anywhere is
+// inline PEM, and any other value is a file path, which must not be blank
+// or contain a line break. Inline PEM must hold complete blocks of the
+// right kind: CERTIFICATE blocks and no private key for client_cert and
+// ca_cert, an unencrypted private key block for client_key (encrypted keys
+// are not supported). Parse checks the PEM structure only. A relative path
+// resolves against the working directory of the process that runs the
+// test, since a definition may arrive on standard input; VoltTest Cloud
+// runs need the inline form. An inline client_key is stored with the
+// definition as written. With insecure_skip_verify true, ca_cert has no
+// effect. Parse problems for these three keys never repeat the value.
+//
+// The http and tls objects and the step keys follow_redirects and
+// max_redirects joined schema_version "2.0" while it is a preview.
 //
 // # Load model (v2)
 //

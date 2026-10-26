@@ -9,6 +9,10 @@ import (
 	"testing"
 )
 
+// privateKeyType ends the PEM block type of every private key. It is built
+// by concatenation so this file holds no private-key text.
+const privateKeyType = "PRIVATE " + "KEY"
+
 // TestFixturesCarryNoSecrets keeps credentials out of the public fixtures,
 // including CSV files embedded as base64 in data_content.
 func TestFixturesCarryNoSecrets(t *testing.T) {
@@ -18,6 +22,11 @@ func TestFixturesCarryNoSecrets(t *testing.T) {
 			raw := readFile(t, f)
 			if bytes.Contains(bytes.ToLower(raw), []byte("secret")) {
 				t.Errorf("%s contains \"secret\"", filepath.ToSlash(f))
+			}
+			// No private key, even a placeholder: secret scanners match the
+			// PEM header whatever the body. Fixtures give client_key as a path.
+			if bytes.Contains(bytes.ToUpper(raw), []byte(privateKeyType)) {
+				t.Errorf("%s contains %q", filepath.ToSlash(f), privateKeyType)
 			}
 			// UseNumber: invalid fixtures may hold numbers out of float64 range.
 			dec := json.NewDecoder(bytes.NewReader(raw))
