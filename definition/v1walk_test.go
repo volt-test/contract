@@ -94,6 +94,7 @@ var v1ReadSet = map[string]string{
 	"tls":                                    "v2",
 	"scenarios[].steps[].follow_redirects":   "v2",
 	"scenarios[].steps[].max_redirects":      "v2",
+	"load":                                   "v2",
 }
 
 type classified struct {
@@ -718,5 +719,51 @@ func TestV1DropsHTTPTLSKeys(t *testing.T) {
 	}
 	if got.HTTPTimeout != "5s" {
 		t.Errorf("http_timeout = %q; a key next to http must still be read", got.HTTPTimeout)
+	}
+}
+
+// TestV1DropsLoadKey checks that load_ignored.json, a v1 definition
+// carrying a load object with values v2 rejects, parses exactly as it does
+// without it, and that a load of the wrong JSON type is dropped as well.
+func TestV1DropsLoadKey(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "testdata", "v1", "cli", "load_ignored.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stripped := withoutV2OnlyKeys(t, raw)
+	if !bytes.Contains(raw, []byte(`"load"`)) || bytes.Contains(stripped, []byte(`"load"`)) {
+		t.Fatalf("the fixture's load key was not removed: %s", stripped)
+	}
+	want, err := Parse(stripped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want.VirtualUsers != 2 || want.Duration != "10s" || want.RampUp != "2s" {
+		t.Fatalf("constant load = %d, %q, %q; the keys next to load must still be read", want.VirtualUsers, want.Duration, want.RampUp)
+	}
+	docs := map[string][]byte{"fixture": raw}
+	for name, load := range map[string]string{
+		"string": `"x"`, "null": `null`, "array": `[1]`, "mistyped keys": `{"type":5,"rate":"fast","stages":{}}`,
+	} {
+		docs[name] = bytes.Replace(stripped, []byte(`"name":`), []byte(`"load":`+load+`,"name":`), 1)
+	}
+	docs["case variant"] = bytes.Replace(stripped, []byte(`"name":`), []byte(`"Load":{"type":"rate"},"name":`), 1)
+	for name, doc := range docs {
+		if !bytes.Contains(bytes.ToLower(doc), []byte(`"load":`)) {
+			t.Fatalf("%s: no load key: %s", name, doc)
+		}
+		got, err := Parse(doc)
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", name, err, doc)
+		}
+		if !got.IsV1() || len(got.V1TypeProblems) != 0 {
+			t.Errorf("%s: IsV1 %v, V1TypeProblems %v", name, got.IsV1(), got.V1TypeProblems)
+		}
+		if got.Load != nil {
+			t.Errorf("%s: load kept: %+v", name, got.Load)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: v1 with load:\n got %+v\nwant %+v", name, got, want)
+		}
 	}
 }

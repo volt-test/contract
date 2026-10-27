@@ -51,6 +51,8 @@ var unknownFixtures = map[string][]string{
 	"unknown_tls.json":                       {"tls.verify"},
 	"unknown_scenario_follow_redirects.json": {"scenarios[0].follow_redirects"},
 	"unknown_request_follow_redirects.json":  {"scenarios[0].steps[0].request.follow_redirects"},
+	"unknown_load_start_rate.json":           {"load.start_rate"},
+	"unknown_load_stage.json":                {"load.stages[0].rate"},
 }
 
 func TestV2UnknownFields(t *testing.T) {
@@ -222,10 +224,10 @@ func TestV2Problems(t *testing.T) {
 			"ramp_up: cannot be combined with stages",
 		}},
 		{"no load model", func(m map[string]any) { delete(m, "virtual_users"); delete(m, "duration") }, []string{
-			"virtual_users: is required (at least 1) unless stages are set",
+			"virtual_users: is required (at least 1) unless stages or load are set",
 		}},
 		{"zero virtual users", func(m map[string]any) { m["virtual_users"] = 0 }, []string{
-			"virtual_users: is required (at least 1) unless stages are set",
+			"virtual_users: is required (at least 1) unless stages or load are set",
 		}},
 		{"run once: no duration", func(m map[string]any) { delete(m, "duration") }, nil},
 		{"run once with ramp_up", func(m map[string]any) { delete(m, "duration"); m["ramp_up"] = "5s" }, nil},
@@ -252,7 +254,7 @@ func TestV2Problems(t *testing.T) {
 			delete(m, "virtual_users")
 			delete(m, "duration")
 			m["stages"] = []any{}
-		}, []string{"virtual_users: is required (at least 1) unless stages are set"}},
+		}, []string{"virtual_users: is required (at least 1) unless stages or load are set"}},
 		{"stage zero duration", func(m map[string]any) {
 			delete(m, "virtual_users")
 			delete(m, "duration")

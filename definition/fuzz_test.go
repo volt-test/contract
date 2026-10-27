@@ -32,6 +32,10 @@ func FuzzParse(f *testing.F) {
 		`{"schema_version":"2.0","name":"x","virtual_users":1,"http":{},"tls":{},"scenarios":[{"name":"a","steps":[{"name":"b","request":{"method":"GET","url":"https://x/"},"max_redirects":1}]}]}`,
 		// A comment line before the block, and a path with a line break, which Parse rejects.
 		`{"schema_version":"2.0","name":"x","virtual_users":1,"tls":{"ca_cert":"## bundle\n-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n","client_cert":"a\nb","client_key":" "},"scenarios":[{"name":"a","steps":[{"name":"b","request":{"method":"GET","url":"https://x/"}}]}]}`,
+		// Both load types, then zero values next to load, and a load Parse rejects.
+		`{"schema_version":"2.0","name":"x","load":{"type":"rate","rate":5,"time_unit":"1m","duration":"1m","preallocated_vus":1,"max_vus":2},"scenarios":[{"name":"a","steps":[{"name":"b","request":{"method":"GET","url":"https://x/"}}]}]}`,
+		`{"schema_version":"2.0","name":"x","virtual_users":0,"duration":"","stages":[],"load":{"type":"ramping_rate","rate":0,"stages":[{"duration":"1m","target":0},{"duration":"1s"}],"preallocated_vus":1,"max_vus":0},"scenarios":[{"name":"a","steps":[{"name":"b","request":{"method":"GET","url":"https://x/"}}]}]}`,
+		`{"schema_version":"2.0","name":"x","virtual_users":3,"load":{"type":"","rate":-1,"time_unit":"0s","stages":[{"target":-1}],"preallocated_vus":0,"max_vus":-1},"scenarios":[{"name":"a","steps":[{"name":"b","request":{"method":"GET","url":"https://x/"}}]}]}`,
 		// A number out of float64 range, which Parse rejects.
 		`{"schema_version":"2.0","name":"x","virtual_users":1,"scenarios":[{"name":"a","steps":[{"name":"b","request":{"method":"GET","url":"https://x/"},"checks":[{"type":"json","selector":"$.a","equals":1e999}]}]}]}`,
 		// Number literals at the edges, and labels cut at 128 bytes.

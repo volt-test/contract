@@ -329,6 +329,116 @@
       "type": "object",
       "description": "HTTP client options for every request: redirects and the HTTP version."
     },
+    "Load": {
+      "anyOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "rate"
+            },
+            "rate": {
+              "minimum": 1
+            },
+            "duration": {
+              "minLength": 1
+            },
+            "stages": {
+              "maxItems": 0
+            }
+          },
+          "required": [
+            "rate",
+            "duration"
+          ]
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "ramping_rate"
+            },
+            "rate": {
+              "maximum": 0
+            },
+            "duration": {
+              "maxLength": 0
+            },
+            "stages": {
+              "minItems": 1
+            }
+          },
+          "required": [
+            "stages"
+          ]
+        }
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "rate",
+            "ramping_rate"
+          ],
+          "description": "\"rate\" starts iterations at a constant rate for duration;\n\"ramping_rate\" moves the rate through stages."
+        },
+        "rate": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Type rate: iterations started per time_unit (at least 1)."
+        },
+        "time_unit": {
+          "type": "string",
+          "description": "The period rate and stage targets count over, e.g. \"1m\" (default \"1s\")."
+        },
+        "duration": {
+          "type": "string",
+          "description": "Type rate: how long the test runs, e.g. \"5m\"."
+        },
+        "stages": {
+          "items": {
+            "$ref": "#/$defs/RateStage"
+          },
+          "type": "array",
+          "description": "Type ramping_rate: the rate starts at 0 and moves linearly to each\nstage's target over that stage's duration."
+        },
+        "preallocated_vus": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Virtual users started before the test begins (at least 1)."
+        },
+        "max_vus": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Most virtual users the test may run (default preallocated_vus). When\nall are busy, an iteration that is due is dropped and counted."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "type",
+        "preallocated_vus"
+      ],
+      "description": "An arrival-rate load profile: iterations start at a set rate, picked up by idle virtual users."
+    },
+    "RateStage": {
+      "properties": {
+        "duration": {
+          "type": "string",
+          "minLength": 1,
+          "description": "How long the stage lasts, e.g. \"1m\"."
+        },
+        "target": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Iterations started per time_unit at the end of the stage."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "duration"
+      ],
+      "description": "One stage of a ramping_rate load profile. The rate starts at 0 and moves linearly to each stage's target over that stage's duration."
+    },
     "RegionWeight": {
       "properties": {
         "region": {
@@ -625,6 +735,11 @@
   },
   "anyOf": [
     {
+      "not": {
+        "required": [
+          "load"
+        ]
+      },
       "properties": {
         "stages": {
           "minItems": 1
@@ -635,6 +750,11 @@
       ]
     },
     {
+      "not": {
+        "required": [
+          "load"
+        ]
+      },
       "properties": {
         "virtual_users": {
           "minimum": 1
@@ -642,6 +762,25 @@
       },
       "required": [
         "virtual_users"
+      ]
+    },
+    {
+      "properties": {
+        "virtual_users": {
+          "maximum": 0
+        },
+        "duration": {
+          "maxLength": 0
+        },
+        "ramp_up": {
+          "maxLength": 0
+        },
+        "stages": {
+          "maxItems": 0
+        }
+      },
+      "required": [
+        "load"
       ]
     }
   ],
@@ -681,6 +820,10 @@
       },
       "type": "array",
       "description": "Staged load: each stage moves to its target number of virtual users\nover its duration. Use instead of virtual_users, duration and ramp_up."
+    },
+    "load": {
+      "$ref": "#/$defs/Load",
+      "description": "Arrival-rate load: iterations start at a set rate, whatever the\nresponse times. Use instead of virtual_users, duration, ramp_up and\nstages."
     },
     "http_timeout": {
       "type": "string",

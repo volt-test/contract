@@ -27,7 +27,9 @@ the v1 engines read and loses nothing on a round trip.
   negative `max_redirects`, unknown versions, a key without a
   certificate, a blank path, a step maximum with following off).
   `TestV1DropsHTTPTLSKeys` in `definition/v1walk_test.go` checks that it
-  parses the same with those keys removed.
+  parses the same with those keys removed. `load_ignored.json` does the
+  same for `load`, with values v2 rejects; `TestV1DropsLoadKey` checks
+  it, and a `load` of the wrong JSON type.
 
 Every `*_ignored.json` fixture keeps the right JSON type for each value:
 `TestV1RewriteMatchesDirectDecode` decodes every v1 fixture with plain
@@ -67,6 +69,9 @@ one, contains "secret".
   `follow_redirects: false`. Empty `"http": {}` and
   `"tls": {}` objects are covered by Go tests (`TestHTTPTLSEmptyObjects`)
   and a fuzz seed.
+  `load_rate.json` and `load_ramping_rate.json` have one `load` of each
+  type with every key; zero values and the other accepted cases are in
+  `TestLoadRules` in `definition/load_test.go`.
 - `invalid/`: definitions `Parse` rejects, run through the schema as well.
   - `unknown_*`: unknown or v1-only keys added to a valid definition. The
     expected paths are listed in `definition/parse_v2_test.go`.
@@ -100,6 +105,14 @@ one, contains "secret".
     object), `unknown_scenario_follow_redirects.json` (no scenario-level
     setting) and `unknown_request_follow_redirects.json` (the key belongs
     on the step, not the request) are `unknown_*` fixtures.
+  - The load model has the families `structure_load_*` and
+    `type_load_*`: `loadFixtureProblems` in `definition/load_test.go`
+    lists the problems each must produce, and the test fails on an
+    unlisted fixture of these families. They cover each `load` rule, a
+    `load` next to the other load keys, and the older
+    `structure_load_none.json` and `structure_load_both.json`.
+    `unknown_load_start_rate.json` (no `start_rate`) and
+    `unknown_load_stage.json` are `unknown_*` fixtures.
   The schema rejects all of them except the cases listed, with reasons, in
   `knownSchemaLooser` in `definition/schema_test.go`.
 
