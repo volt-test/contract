@@ -18,8 +18,8 @@
 // case-insensitively, and v2-only keys (contract:"v2", such as
 // target.base_url, thresholds, expected_statuses, http, tls, load, a
 // step's checks, follow_redirects and max_redirects, and an extractor's
-// required and on_fail) are dropped unread. Values are checked for their JSON type
-// only, with two classes of field:
+// required and on_fail) are dropped unread. Values are checked for their
+// JSON type only, with two classes of field:
 //
 //   - Core fields are decoded by every v1 reader (the headless CLI, the
 //     cloud engine and the backend), all of which reject a value of the

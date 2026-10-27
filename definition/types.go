@@ -222,7 +222,7 @@ type Stage struct {
 type Load struct {
 	// "rate" starts iterations at a constant rate for duration;
 	// "ramping_rate" moves the rate through stages.
-	Type string `json:"type" jsonschema:"required,enum=rate,enum=ramping_rate"`
+	Type LoadType `json:"type" jsonschema:"required,enum=rate,enum=ramping_rate"`
 	// Type rate: iterations started per time_unit (at least 1).
 	Rate int `json:"rate,omitempty" jsonschema:"minimum=0"`
 	// The period rate and stage targets count over, e.g. "1m" (default "1s").
@@ -239,7 +239,7 @@ type Load struct {
 	MaxVUs int `json:"max_vus,omitempty" jsonschema:"minimum=0"`
 }
 
-// RateStage is one step of a ramping_rate load profile. The rate moves
+// RateStage is one stage of a ramping_rate load profile. The rate moves
 // linearly from the previous stage's target (0 for the first) to Target.
 type RateStage struct {
 	// How long the stage lasts, e.g. "1m".

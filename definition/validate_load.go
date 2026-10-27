@@ -6,13 +6,17 @@ import (
 	"strings"
 )
 
-// Load types the engines accept.
+// LoadType is the type of a Load: how the arrival rate is set over the
+// test.
+type LoadType string
+
+// The load types.
 const (
-	LoadRate        = "rate"
-	LoadRampingRate = "ramping_rate"
+	LoadRate        LoadType = "rate"
+	LoadRampingRate LoadType = "ramping_rate"
 )
 
-var loadTypes = []string{LoadRate, LoadRampingRate}
+var loadTypes = []string{string(LoadRate), string(LoadRampingRate)}
 
 // validateLoad checks d.Load, which is non-nil.
 func validateLoad(ps *problems, d *Definition) {
@@ -34,7 +38,7 @@ func validateLoad(ps *problems, d *Definition) {
 	}
 
 	l := d.Load
-	ps.oneOf("load.type", l.Type, loadTypes)
+	ps.oneOf("load.type", string(l.Type), loadTypes)
 	if l.TimeUnit != "" {
 		ps.positiveDuration("load.time_unit", l.TimeUnit, "")
 	}

@@ -80,7 +80,7 @@ func generateSchema(t *testing.T) []byte {
 		"HTTPOptions":  "HTTP client options for every request: redirects and the HTTP version.",
 		"TLSOptions":   "TLS options for HTTPS targets: verification, minimum version and client certificates.",
 		"Load":         "An arrival-rate load profile: iterations start at a set rate, picked up by idle virtual users.",
-		"RateStage":    "One stage of a ramping_rate load profile.",
+		"RateStage":    "One stage of a ramping_rate load profile. The rate starts at 0 and moves linearly to each stage's target over that stage's duration.",
 	}
 	for name, def := range s.Definitions {
 		desc, ok := typeDescriptions[name]
@@ -132,12 +132,12 @@ func loadModels(s *jsonschema.Schema) {
 	}
 
 	rate := jsonschema.NewProperties()
-	rate.Set("type", &jsonschema.Schema{Const: definition.LoadRate})
+	rate.Set("type", &jsonschema.Schema{Const: string(definition.LoadRate)})
 	rate.Set("rate", &jsonschema.Schema{Minimum: json.Number("1")})
 	rate.Set("duration", &jsonschema.Schema{MinLength: &one})
 	rate.Set("stages", &jsonschema.Schema{MaxItems: &zero})
 	ramping := jsonschema.NewProperties()
-	ramping.Set("type", &jsonschema.Schema{Const: definition.LoadRampingRate})
+	ramping.Set("type", &jsonschema.Schema{Const: string(definition.LoadRampingRate)})
 	ramping.Set("rate", &jsonschema.Schema{Maximum: json.Number("0")})
 	ramping.Set("duration", &jsonschema.Schema{MaxLength: &zero})
 	ramping.Set("stages", &jsonschema.Schema{MinItems: &one})

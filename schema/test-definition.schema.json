@@ -437,7 +437,7 @@
       "required": [
         "duration"
       ],
-      "description": "One stage of a ramping_rate load profile."
+      "description": "One stage of a ramping_rate load profile. The rate starts at 0 and moves linearly to each stage's target over that stage's duration."
     },
     "RegionWeight": {
       "properties": {
