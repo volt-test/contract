@@ -35,10 +35,12 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 	}
 	ps.duration("ramp_up", d.RampUp)
 	ps.duration("http_timeout", d.HTTPTimeout)
-	// Load model: non-empty stages, or virtual_users (at least 1) with
-	// optional duration and ramp_up. Without duration each virtual user
-	// runs its scenario once. Zero values count as absent.
-	if len(d.Stages) > 0 {
+	// Load model: load alone, non-empty stages, or virtual_users (at least
+	// 1) with optional duration and ramp_up. Without duration each virtual
+	// user runs its scenario once. Zero values count as absent.
+	if d.Load != nil {
+		validateLoad(&ps, d)
+	} else if len(d.Stages) > 0 {
 		if d.VirtualUsers != 0 {
 			ps.add("virtual_users", "cannot be combined with stages")
 		}
@@ -48,10 +50,8 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 		if d.RampUp != "" {
 			ps.add("ramp_up", "cannot be combined with stages")
 		}
-	} else {
-		if d.VirtualUsers == 0 {
-			ps.add("virtual_users", "is required (at least 1) unless stages are set")
-		}
+	} else if d.VirtualUsers == 0 {
+		ps.add("virtual_users", "is required (at least 1) unless stages or load are set")
 	}
 	for i, s := range d.Stages {
 		p := "stages[" + strconv.Itoa(i) + "]"

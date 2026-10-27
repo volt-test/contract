@@ -1,0 +1,27 @@
+{
+  "schema_version": "2.0",
+  "name": "Invalid load",
+  "load": {
+    "type": "rate",
+    "rate": 500,
+    "time_unit": "1s",
+    "duration": "5m",
+    "preallocated_vus": 200,
+    "max_vus": 1000,
+    "start_rate": 10
+  },
+  "scenarios": [
+    {
+      "name": "Home",
+      "steps": [
+        {
+          "name": "Get home",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/"
+          }
+        }
+      ]
+    }
+  ]
+}

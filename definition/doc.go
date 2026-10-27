@@ -16,9 +16,9 @@
 // A v1 definition (no schema_version, or 1, "1", "1.0" or null) is read the
 // way the v1 readers read it: unknown keys are ignored, keys match
 // case-insensitively, and v2-only keys (contract:"v2", such as
-// target.base_url, thresholds, expected_statuses, http, tls, a step's
-// checks, follow_redirects and max_redirects, and an extractor's required
-// and on_fail) are dropped unread. Values are checked for their JSON type
+// target.base_url, thresholds, expected_statuses, http, tls, load, a
+// step's checks, follow_redirects and max_redirects, and an extractor's
+// required and on_fail) are dropped unread. Values are checked for their JSON type
 // only, with two classes of field:
 //
 //   - Core fields are decoded by every v1 reader (the headless CLI, the
@@ -223,8 +223,14 @@
 //
 // # Load model (v2)
 //
-// Either non-empty stages, or virtual_users (at least 1) with optional
-// duration and ramp_up. Without duration each virtual user runs its
-// scenario once. A duration that is present must be greater than zero, and
-// so must every stage duration.
+// One of: non-empty stages; virtual_users (at least 1) with optional
+// duration and ramp_up; or load alone. Without duration each virtual user
+// runs its scenario once. A duration that is present must be greater than
+// zero, and so must every stage duration.
+//
+// Load is an arrival-rate (open) model. Type LoadRate needs rate and
+// duration; LoadRampingRate needs stages and takes neither. Rates count
+// iterations per time_unit; "" means 1s. preallocated_vus is required, and
+// max_vus 0 means preallocated_vus. Parse leaves both defaults to the
+// reader. load joined schema_version "2.0" while it is a preview.
 package definition

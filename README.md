@@ -32,7 +32,8 @@ v2 and later definitions carry `schema_version` as a `"MAJOR.MINOR"` string.
   minor. [Checks](#checks), `expected_statuses`, the extractor keys
   `required` and `on_fail`, and the [HTTP and TLS
   options](#http-and-tls-options) (`http`, `tls` and a step's
-  `follow_redirects` and `max_redirects`) joined `"2.0"` under this rule.
+  `follow_redirects` and `max_redirects`) and the [arrival-rate
+  load](#arrival-rate-load) (`load`) joined `"2.0"` under this rule.
 - A reader rejects an unknown major, or a minor newer than it supports.
 
 The module version and `schema_version` move independently: schema `"2.0"`
@@ -48,8 +49,9 @@ does not mean module v2.
   - a name, and at least one scenario with at least one step;
   - unique scenario names, and unique step names within a scenario;
   - durations that parse ("30s", "1m30s");
-  - a load model: either non-empty `stages`, or `virtual_users` (at
-    least 1) with optional `duration` and `ramp_up`, never both. Without
+  - a load model: non-empty `stages`, `virtual_users` (at least 1) with
+    optional `duration` and `ramp_up`, or a `load` object (see
+    [Arrival-rate load](#arrival-rate-load)), exactly one of them. Without
     `duration` each virtual user runs its scenario once; a `duration` that
     is present must be greater than zero, and so must every stage's
     `duration`;
@@ -70,7 +72,7 @@ does not mean module v2.
 - **v1** is read the way the v1 readers (the CLI, the cloud engine and the
   backend) read it. Unknown keys are ignored, keys match case-insensitively,
   and v2-only keys (`target.base_url`, `thresholds` at every level,
-  `expected_statuses`, `http`, `tls`, a step's `checks`,
+  `expected_statuses`, `http`, `tls`, `load`, a step's `checks`,
   `follow_redirects` and `max_redirects`, and an extractor's `required`
   and `on_fail`) are dropped unread, whatever their value. Values are
   checked for their JSON type only:
@@ -139,7 +141,8 @@ labels. For the HTTP and TLS options it also checks the rules that span
 keys or levels (a step's `max_redirects` against the `follow_redirects`
 in effect for it, `client_cert` and `client_key` together), the PEM
 contents of `client_cert`, `client_key` and `ca_cert`, and blank or
-multi-line file paths.
+multi-line file paths. For `load` it also checks that durations are
+greater than zero and that `max_vus` is at least `preallocated_vus`.
 
 ### Error size
 
@@ -515,6 +518,57 @@ PEM under the same key:
 - With `insecure_skip_verify: true`, `ca_cert` is accepted but has no
   effect: verification is skipped.
 - `Parse` errors for these three keys never repeat the value.
+
+## Arrival-rate load
+
+With `virtual_users` or `stages`, each virtual user starts its next
+iteration when the last one ends, so a slower target gets fewer requests.
+A `load` object instead starts iterations at a set rate, whatever the
+response times. It replaces `virtual_users`, `duration`, `ramp_up` and
+`stages`, which must then be absent (or written with their zero value).
+
+```json
+"load": {
+  "type": "rate",
+  "rate": 500,
+  "time_unit": "1s",
+  "duration": "5m",
+  "preallocated_vus": 200,
+  "max_vus": 1000
+}
+```
+
+```json
+"load": {
+  "type": "ramping_rate",
+  "time_unit": "1m",
+  "stages": [
+    {"duration": "2m", "target": 600},
+    {"duration": "5m", "target": 600},
+    {"duration": "1m", "target": 0}
+  ],
+  "preallocated_vus": 50
+}
+```
+
+| Key | Applies to | Meaning |
+|---|---|---|
+| `type` | both, required | `"rate"` or `"ramping_rate"`. |
+| `rate` | `rate`, required | Iterations started per `time_unit`, at least 1. |
+| `duration` | `rate`, required | How long the test runs, greater than zero. |
+| `stages` | `ramping_rate`, required | At least one `{duration, target}`. The rate starts at 0 and moves linearly to each stage's `target` (0 or more) over that stage's `duration` (greater than zero). |
+| `time_unit` | both | The period `rate` and `target` count over. Default `"1s"`; must be greater than zero. |
+| `preallocated_vus` | both, required | Virtual users started before the test begins, at least 1. |
+| `max_vus` | both | Most virtual users the test may run, at least `preallocated_vus`. `0` or absent means `preallocated_vus`. |
+
+- `"rate"` takes no `stages`, and `"ramping_rate"` takes no `rate` or
+  `duration`; each may still be written with its zero value.
+- An iteration that is due starts on an idle virtual user. When none is
+  idle and fewer than `max_vus` run, a new one starts; otherwise the
+  iteration is dropped and counted.
+- There is no `start_rate`.
+- `Parse` leaves the defaults to the reader: `time_unit` stays `""` and
+  `max_vus` stays `0`.
 
 ## Compatibility
 

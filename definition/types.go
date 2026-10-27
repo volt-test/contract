@@ -52,6 +52,10 @@ type Definition struct {
 	// Staged load: each stage moves to its target number of virtual users
 	// over its duration. Use instead of virtual_users, duration and ramp_up.
 	Stages []Stage `json:"stages,omitempty"`
+	// Arrival-rate load: iterations start at a set rate, whatever the
+	// response times. Use instead of virtual_users, duration, ramp_up and
+	// stages.
+	Load *Load `json:"load,omitempty" contract:"v2"`
 
 	// Timeout for each HTTP request, e.g. "30s".
 	HTTPTimeout string `json:"http_timeout,omitempty"`
@@ -211,6 +215,36 @@ type Stage struct {
 	// How long the stage lasts, e.g. "1m".
 	Duration string `json:"duration" jsonschema:"required,minLength=1"`
 	// Number of virtual users at the end of the stage.
+	Target int `json:"target,omitempty" jsonschema:"minimum=0"`
+}
+
+// Load is an arrival-rate load profile.
+type Load struct {
+	// "rate" starts iterations at a constant rate for duration;
+	// "ramping_rate" moves the rate through stages.
+	Type string `json:"type" jsonschema:"required,enum=rate,enum=ramping_rate"`
+	// Type rate: iterations started per time_unit (at least 1).
+	Rate int `json:"rate,omitempty" jsonschema:"minimum=0"`
+	// The period rate and stage targets count over, e.g. "1m" (default "1s").
+	TimeUnit string `json:"time_unit,omitempty"`
+	// Type rate: how long the test runs, e.g. "5m".
+	Duration string `json:"duration,omitempty"`
+	// Type ramping_rate: the rate starts at 0 and moves linearly to each
+	// stage's target over that stage's duration.
+	Stages []RateStage `json:"stages,omitempty"`
+	// Virtual users started before the test begins (at least 1).
+	PreallocatedVUs int `json:"preallocated_vus" jsonschema:"required,minimum=1"`
+	// Most virtual users the test may run (default preallocated_vus). When
+	// all are busy, an iteration that is due is dropped and counted.
+	MaxVUs int `json:"max_vus,omitempty" jsonschema:"minimum=0"`
+}
+
+// RateStage is one step of a ramping_rate load profile. The rate moves
+// linearly from the previous stage's target (0 for the first) to Target.
+type RateStage struct {
+	// How long the stage lasts, e.g. "1m".
+	Duration string `json:"duration" jsonschema:"required,minLength=1"`
+	// Iterations started per time_unit at the end of the stage.
 	Target int `json:"target,omitempty" jsonschema:"minimum=0"`
 }
 

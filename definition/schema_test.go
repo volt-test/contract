@@ -79,6 +79,8 @@ func generateSchema(t *testing.T) []byte {
 		"Threshold":    "A pass/fail rule: an expression such as \"p95 < 500ms\", or an object with the expression and abort settings.",
 		"HTTPOptions":  "HTTP client options for every request: redirects and the HTTP version.",
 		"TLSOptions":   "TLS options for HTTPS targets: verification, minimum version and client certificates.",
+		"Load":         "An arrival-rate load profile: iterations start at a set rate, picked up by idle virtual users.",
+		"RateStage":    "One stage of a ramping_rate load profile.",
 	}
 	for name, def := range s.Definitions {
 		desc, ok := typeDescriptions[name]
@@ -91,16 +93,9 @@ func generateSchema(t *testing.T) []byte {
 	// Rules Parse applies that the reflector cannot derive from the types.
 	// They may only make the schema stricter where Parse is stricter still:
 	// the schema must never reject a definition Parse accepts.
-	// Load model: non-empty stages, or at least one virtual user.
-	one := uint64(1)
-	staged := jsonschema.NewProperties()
-	staged.Set("stages", &jsonschema.Schema{MinItems: &one})
-	constant := jsonschema.NewProperties()
-	constant.Set("virtual_users", &jsonschema.Schema{Minimum: json.Number("1")})
-	s.AnyOf = []*jsonschema.Schema{
-		{Required: []string{"stages"}, Properties: staged},
-		{Required: []string{"virtual_users"}, Properties: constant},
-	}
+	// Load model: non-empty stages, at least one virtual user, or load
+	// alone. The other keys may be written with their zero value.
+	loadModels(s)
 	s.Definitions["DataConfig"].AnyOf = []*jsonschema.Schema{
 		{Required: []string{"data_source"}},
 		{Required: []string{"data_content"}},
@@ -112,6 +107,44 @@ func generateSchema(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	return append(b, '\n')
+}
+
+// loadModels adds the load model rules: the top-level choice between
+// stages, virtual_users and load, and the keys each load type requires or
+// forbids. Zero values read as absent, so a forbidden key may still be
+// written with its zero value.
+func loadModels(s *jsonschema.Schema) {
+	zero, one := uint64(0), uint64(1)
+	noLoad := &jsonschema.Schema{Required: []string{"load"}}
+	staged := jsonschema.NewProperties()
+	staged.Set("stages", &jsonschema.Schema{MinItems: &one})
+	constant := jsonschema.NewProperties()
+	constant.Set("virtual_users", &jsonschema.Schema{Minimum: json.Number("1")})
+	loadOnly := jsonschema.NewProperties()
+	loadOnly.Set("virtual_users", &jsonschema.Schema{Maximum: json.Number("0")})
+	loadOnly.Set("duration", &jsonschema.Schema{MaxLength: &zero})
+	loadOnly.Set("ramp_up", &jsonschema.Schema{MaxLength: &zero})
+	loadOnly.Set("stages", &jsonschema.Schema{MaxItems: &zero})
+	s.AnyOf = []*jsonschema.Schema{
+		{Required: []string{"stages"}, Properties: staged, Not: noLoad},
+		{Required: []string{"virtual_users"}, Properties: constant, Not: noLoad},
+		{Required: []string{"load"}, Properties: loadOnly},
+	}
+
+	rate := jsonschema.NewProperties()
+	rate.Set("type", &jsonschema.Schema{Const: definition.LoadRate})
+	rate.Set("rate", &jsonschema.Schema{Minimum: json.Number("1")})
+	rate.Set("duration", &jsonschema.Schema{MinLength: &one})
+	rate.Set("stages", &jsonschema.Schema{MaxItems: &zero})
+	ramping := jsonschema.NewProperties()
+	ramping.Set("type", &jsonschema.Schema{Const: definition.LoadRampingRate})
+	ramping.Set("rate", &jsonschema.Schema{Maximum: json.Number("0")})
+	ramping.Set("duration", &jsonschema.Schema{MaxLength: &zero})
+	ramping.Set("stages", &jsonschema.Schema{MinItems: &one})
+	s.Definitions["Load"].AnyOf = []*jsonschema.Schema{
+		{Required: []string{"rate", "duration"}, Properties: rate},
+		{Required: []string{"stages"}, Properties: ramping},
+	}
 }
 
 // checkSchemaRules adds the check, required-extractor and expected_statuses rules
@@ -310,6 +343,11 @@ var knownSchemaLooser = map[string]string{
 	"structure_tls_ca_wrong_block.json":              "PEM contents are plain strings in the schema",
 	"structure_tls_blank_path.json":                  "optional keys take no pattern; a blank path is a Parse rule",
 	"structure_tls_path_with_newline.json":           "optional keys take no pattern; a line break in a path is a Parse rule",
+
+	"structure_load_time_unit_zero.json":              "durations are plain strings in the schema",
+	"structure_load_rate_duration_zero.json":          "durations are plain strings in the schema",
+	"structure_load_ramping_stage_zero_duration.json": "durations are plain strings in the schema",
+	"structure_load_max_vus_below_preallocated.json":  "max_vus >= preallocated_vus compares two keys",
 }
 
 // TestSchemaAgreesWithParse checks that the schema and Parse agree on
@@ -521,8 +559,47 @@ func TestSchemaShape(t *testing.T) {
 		t.Errorf("schema tls min_version %q != Parse %q", got, want)
 	}
 
+	if got, want := enum("Load", "type"), sorted(definition.LoadTypesForTest); !reflect.DeepEqual(got, want) {
+		t.Errorf("schema load types %q != Parse %q", got, want)
+	}
+
 	checkShape(t, props, defs)
 	httpTLSShape(t, props, defs)
+	loadShape(t, s, defs)
+}
+
+// loadShape pins the schema of the load object.
+func loadShape(t *testing.T, s, defs map[string]any) {
+	t.Helper()
+	obj := func(v any) map[string]any { m, _ := v.(map[string]any); return m }
+	keys := func(m map[string]any) []string {
+		var out []string
+		for k := range m {
+			out = append(out, k)
+		}
+		sort.Strings(out)
+		return out
+	}
+	if got := obj(obj(s["properties"])["load"])["$ref"]; got != "#/$defs/Load" {
+		t.Errorf("load $ref = %v", got)
+	}
+	load := obj(defs["Load"])
+	want := []string{"duration", "max_vus", "preallocated_vus", "rate", "stages", "time_unit", "type"}
+	if got := keys(obj(load["properties"])); !reflect.DeepEqual(got, want) {
+		t.Errorf("load keys = %q, want %q", got, want)
+	}
+	if !reflect.DeepEqual(load["required"], []any{"type", "preallocated_vus"}) {
+		t.Errorf("load required = %v", load["required"])
+	}
+	if got := keys(obj(obj(defs["RateStage"])["properties"])); !reflect.DeepEqual(got, []string{"duration", "target"}) {
+		t.Errorf("rate stage keys = %q", got)
+	}
+	if branches, _ := load["anyOf"].([]any); len(branches) != 2 {
+		t.Errorf("load anyOf = %v, want one branch per type", load["anyOf"])
+	}
+	if branches, _ := s["anyOf"].([]any); len(branches) != 3 {
+		t.Errorf("top-level anyOf = %v, want stages, virtual_users and load", s["anyOf"])
+	}
 }
 
 // httpTLSShape pins the schema of the http and tls objects and the step

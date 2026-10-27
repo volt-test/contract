@@ -10,6 +10,7 @@ var (
 	JSONKindsForTest        = jsonKinds
 	HTTPVersionsForTest     = httpVersions
 	TLSVersionsForTest      = tlsVersions
+	LoadTypesForTest        = loadTypes
 	MinEngineReleaseForTest = minEngineRelease
 )
 
