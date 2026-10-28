@@ -30,7 +30,11 @@ the v1 engines read and loses nothing on a round trip.
   `TestV1DropsHTTPTLSKeys` in `definition/v1walk_test.go` checks that it
   parses the same with those keys removed. `load_ignored.json` does the
   same for `load`, with values v2 rejects; `TestV1DropsLoadKey` checks
-  it, and a `load` of the wrong JSON type.
+  it, and a `load` of the wrong JSON type. `setup_teardown_ignored.json`
+  does the same for a scenario's `run_once` and `teardown`, with values v2
+  rejects (both on one scenario, weights, no load scenario, a global
+  extracted again); `TestV1DropsSetupTeardownKeys` checks it, and the
+  keys with the wrong JSON type or case.
 
 Every `*_ignored.json` fixture keeps the right JSON type for each value:
 `TestV1RewriteMatchesDirectDecode` decodes every v1 fixture with plain
@@ -75,6 +79,13 @@ one, contains "secret".
   `load_rate.json` and `load_ramping_rate.json` have one `load` of each
   type with every key; zero values and the other accepted cases are in
   `TestLoadRules` in `definition/load_test.go`.
+  `setup_teardown.json` has two `run_once` scenarios (the second reads the
+  first's global), two load scenarios and a `teardown` scenario reading
+  both globals, with `run_once: false`, `teardown: false` and `weight: 0`
+  written out. `run_once.json` is older and unrelated: a constant load
+  without `duration`, so each virtual user runs its scenario once. The
+  other accepted cases are in `TestSetupTeardownRules` in
+  `definition/setup_teardown_test.go`.
 - `invalid/`: definitions `Parse` rejects, run through the schema as well.
   - `unknown_*`: unknown or v1-only keys added to a valid definition. The
     expected paths are listed in `definition/parse_v2_test.go`.
@@ -117,6 +128,14 @@ one, contains "secret".
     `structure_load_none.json` and `structure_load_both.json`.
     `unknown_load_start_rate.json` (no `start_rate`) and
     `unknown_load_stage.json` are `unknown_*` fixtures.
+  - Setup and teardown scenarios have the families `structure_run_once_*`,
+    `structure_teardown_*`, `type_run_once_*` and `type_teardown_*`:
+    `setupTeardownFixtureProblems` in `definition/setup_teardown_test.go`
+    lists the problems each must produce, and the test fails on an
+    unlisted fixture of these families. They cover both flags on one
+    scenario, a weight on either, no load scenario, a global extracted
+    again by a load scenario defined before the setup scenario or by a
+    second setup scenario, and flags of the wrong JSON type.
   The schema rejects all of them except the cases listed, with reasons, in
   `knownSchemaLooser` in `definition/schema_test.go`.
 

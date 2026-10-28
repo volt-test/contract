@@ -97,11 +97,13 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 	if len(d.Scenarios) == 0 {
 		ps.add("scenarios", "must have at least one scenario")
 	}
+	globals := setupGlobals(d.Scenarios)
 	scenarioNames := map[string]int{}
 	for i, sc := range d.Scenarios {
 		p := "scenarios[" + strconv.Itoa(i) + "]"
 		ps.uniqueName(p, sc.Name, scenarioNames, i, "scenarios")
 		ps.nonNegative(p+".weight", sc.Weight)
+		validateSetupTeardown(&ps, p, sc)
 		ps.duration(p+".think_time", sc.ThinkTime)
 		if sc.DataConfig != nil {
 			validateDataConfig(&ps, p+".data_config", sc.DataConfig)
@@ -143,6 +145,10 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 						ps.oneOf(ep+".pick", string(ex.Pick), picks)
 					}
 				}
+				if owner, ok := globals[ex.VariableName]; ok && owner != i {
+					ps.add(ep+".variable_name", fmt.Sprintf("%s is a global set by the run_once scenario scenarios[%d]; "+
+						"no other scenario may extract it", quoteShort(ex.VariableName), owner))
+				}
 			}
 			for k, c := range st.Checks {
 				validateCheck(&ps, sp+".checks["+strconv.Itoa(k)+"]", c)
@@ -151,8 +157,59 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 			validateStepRedirects(&ps, sp, st, follows)
 		}
 	}
+	if len(d.Scenarios) > 0 && !hasLoadScenario(d.Scenarios) {
+		ps.add("scenarios", "must have at least one load scenario, one without run_once or teardown")
+	}
 	collectBounds(d, &ps, false, false, func(path string, _ ThresholdConfig) bool { return objectForms[path] })
 	return ps.err()
+}
+
+// validateSetupTeardown applies the run_once and teardown rules to one
+// scenario: not both, and no weight, since neither is picked for the load.
+func validateSetupTeardown(ps *problems, p string, sc Scenario) {
+	if sc.RunOnce && sc.Teardown {
+		ps.add(p+".teardown", "cannot be combined with run_once")
+	}
+	if sc.Weight > 0 {
+		switch {
+		case sc.RunOnce:
+			ps.add(p+".weight", "does not apply to a run_once scenario, which is never picked for the load")
+		case sc.Teardown:
+			ps.add(p+".weight", "does not apply to a teardown scenario, which is never picked for the load")
+		}
+	}
+}
+
+// setupGlobals maps each variable a run_once scenario extracts to the
+// index of the first run_once scenario that extracts it. Blank names are
+// left out; they are reported as missing.
+func setupGlobals(scenarios []Scenario) map[string]int {
+	globals := map[string]int{}
+	for i, sc := range scenarios {
+		if !sc.RunOnce {
+			continue
+		}
+		for _, st := range sc.Steps {
+			for _, ex := range st.Extract {
+				if strings.TrimSpace(ex.VariableName) == "" {
+					continue
+				}
+				if _, seen := globals[ex.VariableName]; !seen {
+					globals[ex.VariableName] = i
+				}
+			}
+		}
+	}
+	return globals
+}
+
+func hasLoadScenario(scenarios []Scenario) bool {
+	for _, sc := range scenarios {
+		if sc.IsLoad() {
+			return true
+		}
+	}
+	return false
 }
 
 func validateDataConfig(ps *problems, p string, dc *DataConfig) {

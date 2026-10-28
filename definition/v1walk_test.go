@@ -86,6 +86,8 @@ var v1ReadSet = map[string]string{
 	"thresholds":                             "v2",
 	"scenarios[].thresholds":                 "v2",
 	"scenarios[].steps[].thresholds":         "v2",
+	"scenarios[].run_once":                   "v2",
+	"scenarios[].teardown":                   "v2",
 	"scenarios[].steps[].checks":             "v2",
 	"scenarios[].steps[].extract[].required": "v2",
 	"scenarios[].steps[].extract[].on_fail":  "v2",
@@ -766,6 +768,59 @@ func TestV1DropsLoadKey(t *testing.T) {
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s: v1 with load:\n got %+v\nwant %+v", name, got, want)
+		}
+	}
+}
+
+// TestV1DropsSetupTeardownKeys checks that setup_teardown_ignored.json, a
+// v1 definition carrying run_once and teardown with values v2 rejects (both
+// on one scenario, weights, no load scenario, a global extracted again),
+// parses exactly as it does without them, and so do mistyped values.
+func TestV1DropsSetupTeardownKeys(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "testdata", "v1", "cli", "setup_teardown_ignored.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stripped := withoutV2OnlyKeys(t, raw)
+	if !bytes.Contains(raw, []byte(`"run_once"`)) || !bytes.Contains(raw, []byte(`"teardown"`)) ||
+		bytes.Contains(stripped, []byte(`"run_once"`)) || bytes.Contains(stripped, []byte(`"teardown"`)) {
+		t.Fatalf("the fixture's run_once and teardown keys were not removed: %s", stripped)
+	}
+	want, err := Parse(stripped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(want.Scenarios) != 2 || want.Scenarios[0].Weight != 1 || want.Scenarios[1].Weight != 2 {
+		t.Fatalf("scenarios = %+v; the keys next to run_once and teardown must still be read", want.Scenarios)
+	}
+	docs := map[string][]byte{"fixture": raw}
+	for name, keys := range map[string]string{
+		"strings":       `"run_once":"yes","teardown":"no",`,
+		"numbers":       `"run_once":1,"teardown":0,`,
+		"null":          `"run_once":null,"teardown":null,`,
+		"objects":       `"run_once":{},"teardown":[true],`,
+		"case variants": `"Run_Once":true,"TEARDOWN":true,`,
+	} {
+		docs[name] = bytes.Replace(stripped, []byte(`"name":"Setup"`), []byte(keys+`"name":"Setup"`), 1)
+	}
+	for name, doc := range docs {
+		if !bytes.Contains(bytes.ToLower(doc), []byte(`"run_once":`)) {
+			t.Fatalf("%s: no run_once key: %s", name, doc)
+		}
+		got, err := Parse(doc)
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", name, err, doc)
+		}
+		if !got.IsV1() || len(got.V1TypeProblems) != 0 {
+			t.Errorf("%s: IsV1 %v, V1TypeProblems %v", name, got.IsV1(), got.V1TypeProblems)
+		}
+		for _, sc := range got.Scenarios {
+			if sc.RunOnce || sc.Teardown {
+				t.Errorf("%s: scenario %s kept run_once/teardown", name, sc.Name)
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: v1 with run_once and teardown:\n got %+v\nwant %+v", name, got, want)
 		}
 	}
 }

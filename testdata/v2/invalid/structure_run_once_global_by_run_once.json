@@ -1,0 +1,70 @@
+{
+  "schema_version": "2.0",
+  "name": "Global extracted by two setups",
+  "virtual_users": 2,
+  "duration": "30s",
+  "scenarios": [
+    {
+      "name": "Setup",
+      "run_once": true,
+      "steps": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "url": "https://shop.example.com/api/login",
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "body": "{\"email\":\"admin@example.com\",\"password\":\"example-password\"}"
+          },
+          "extract": [
+            {
+              "variable_name": "admin_token",
+              "selector": "$.data.token",
+              "type": "json",
+              "required": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Setup again",
+      "run_once": true,
+      "steps": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "url": "https://shop.example.com/api/login",
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "body": "{\"email\":\"admin@example.com\",\"password\":\"example-password\"}"
+          },
+          "extract": [
+            {
+              "variable_name": "admin_token",
+              "selector": "$.data.token",
+              "type": "json",
+              "required": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Home",
+      "steps": [
+        {
+          "name": "Get home",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "schema_version": "2.0",
+  "name": "No load scenario",
+  "virtual_users": 2,
+  "duration": "30s",
+  "scenarios": [
+    {
+      "name": "Setup",
+      "run_once": true,
+      "steps": [
+        {
+          "name": "Get home",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Clean up",
+      "teardown": true,
+      "steps": [
+        {
+          "name": "Get home",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/"
+          }
+        }
+      ]
+    }
+  ]
+}

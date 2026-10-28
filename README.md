@@ -55,6 +55,10 @@ does not mean module v2.
     `duration` each virtual user runs its scenario once; a `duration` that
     is present must be greater than zero, and so must every stage's
     `duration`;
+  - `run_once` and `teardown` not both on one scenario, no `weight` on
+    either, at least one load scenario, and no other scenario extracting a
+    variable a `run_once` scenario sets (see [Setup and
+    teardown](#setup-and-teardown));
   - known extractor types, data formats and data modes, and an
     extractor's `pick` from its list, on `json`, `regex` and `html`
     extractors only (see [Extracting from arrays](#extracting-from-arrays));
@@ -74,7 +78,8 @@ does not mean module v2.
 - **v1** is read the way the v1 readers (the CLI, the cloud engine and the
   backend) read it. Unknown keys are ignored, keys match case-insensitively,
   and v2-only keys (`target.base_url`, `thresholds` at every level,
-  `expected_statuses`, `http`, `tls`, `load`, a step's `checks`,
+  `expected_statuses`, `http`, `tls`, `load`, a scenario's `run_once` and
+  `teardown`, a step's `checks`,
   `follow_redirects` and `max_redirects`, and an extractor's `required`,
   `on_fail` and `pick`) are dropped unread, whatever their value. Values are
   checked for their JSON type only:
@@ -634,6 +639,93 @@ response times. It replaces `virtual_users`, `duration`, `ramp_up` and
 - There is no `start_rate`.
 - `Parse` leaves the defaults to the reader: `time_unit` stays `""` and
   `max_vus` stays `0`.
+
+## Setup and teardown
+
+A scenario with `"run_once": true` is a setup scenario, and one with
+`"teardown": true` is a teardown scenario. Neither is picked for the load:
+each runs once per test, by one virtual user. The other scenarios are load
+scenarios. (Leaving out `duration` is unrelated: it makes each virtual user
+run its load scenario once.)
+
+```json
+"scenarios": [
+  {
+    "name": "Log in",
+    "run_once": true,
+    "steps": [{
+      "name": "Login",
+      "request": {"method": "POST", "url": "https://shop.example.com/api/login",
+                  "headers": {"Content-Type": "application/json"},
+                  "body": "{\"email\":\"admin@example.com\"}"},
+      "extract": [{"variable_name": "admin_token", "selector": "$.data.token",
+                   "type": "json", "required": true}]
+    }]
+  },
+  {
+    "name": "Browse",
+    "steps": [{
+      "name": "Products",
+      "request": {"method": "GET", "url": "https://shop.example.com/api/products",
+                  "headers": {"Authorization": "Bearer ${admin_token}"}}
+    }]
+  },
+  {
+    "name": "Clean up",
+    "teardown": true,
+    "steps": [{
+      "name": "Delete seeded data",
+      "request": {"method": "DELETE", "url": "https://shop.example.com/api/seed",
+                  "headers": {"Authorization": "Bearer ${admin_token}"}}
+    }]
+  }
+]
+```
+
+- **Setup.** Setup scenarios run before the load starts, one at a time in
+  definition order, each by a fresh virtual user whose `${vu_id}` is 0
+  (load virtual users start at 1). Their `data_config` and `think_time`
+  apply as usual.
+- **Globals.** The variables a setup scenario extracts become globals:
+  read-only, and readable as `${name}` by every load virtual user and by
+  the teardown scenarios. A later setup scenario sees the globals of the
+  earlier ones.
+- **Precedence.** A CSV column, then a global, then a built-in variable.
+  A CSV column named like a global shadows it, in the virtual user that
+  reads that row only. A setup extractor named like a built-in (such as
+  `vu_id`, `iteration` or `scenario`) overrides that built-in in every
+  load virtual user, since variables win over built-ins; this is allowed
+  but best avoided.
+- **Setup failure.** When a setup step fails (a `fail` or `abort` check
+  that fails, a required extractor that misses, a transport error or an
+  unexpected status), the run fails before the load starts, and neither
+  the load nor the teardown runs. `on_fail: "record"` makes a check
+  advisory. Stopping the run during setup ends it as stopped, never as
+  failed, and the teardown does not run either.
+- **Teardown.** Teardown scenarios run once each, in definition order,
+  after every load virtual user has stopped, whether the load completed,
+  was stopped or was aborted by a threshold, with the globals readable.
+  They do not run after a failed or stopped setup. A teardown is not
+  cancelled by a stop: its `think_time` runs in full and only
+  `http_timeout` bounds each request. A stop during the teardown keeps
+  the load's status, and a failing teardown never changes the status;
+  its checks count like any other (use `on_fail: "record"` to make them
+  advisory).
+- **Timing and results.** `duration`, `stages` and `load` time the load
+  only, from the end of setup. Setup and teardown requests count in the
+  test totals (including `rps`) and are also reported under their own
+  scenario names, once, not per virtual user.
+- **Rules.** `Parse` rejects `run_once` and `teardown` on the same
+  scenario, a `weight` above 0 on either, a definition with no load
+  scenario, and an extractor in any other scenario (another setup
+  scenario included) whose `variable_name` a setup scenario already
+  extracts. Two steps of the same setup scenario may extract the same
+  variable. `false` and a `weight` of 0 read as absent.
+- **Cloud.** VoltTest Cloud does not run setup or teardown scenarios yet
+  and rejects a definition that has them.
+
+`run_once` and `teardown` joined schema_version "2.0" while it is a
+preview.
 
 ## Compatibility
 

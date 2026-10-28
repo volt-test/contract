@@ -1,0 +1,57 @@
+{
+  "name": "v1 definition with run_once and teardown keys",
+  "virtual_users": 2,
+  "duration": "10s",
+  "scenarios": [
+    {
+      "name": "Setup",
+      "weight": 1,
+      "run_once": true,
+      "teardown": true,
+      "steps": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "url": "https://api.example.com/login",
+            "header": {
+              "Content-Type": "application/json"
+            },
+            "body": "{\"email\":\"user@example.com\"}"
+          },
+          "extract": [
+            {
+              "variable_name": "token",
+              "selector": "$.token",
+              "type": "json"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Read",
+      "weight": 2,
+      "teardown": true,
+      "steps": [
+        {
+          "name": "Items",
+          "request": {
+            "method": "GET",
+            "url": "https://api.example.com/items",
+            "header": {
+              "Authorization": "Bearer ${token}"
+            }
+          },
+          "extract": [
+            {
+              "variable_name": "token",
+              "selector": "$.next",
+              "type": "json"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
