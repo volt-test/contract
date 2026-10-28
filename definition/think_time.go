@@ -12,10 +12,10 @@ var errNegativeThinkTime = errors.New("must not be negative")
 // ParseThinkTime reads a v2 think_time: a duration such as "500ms", or a
 // range "MIN-MAX" such as "1s-3s" for a uniformly random pause between
 // the two, bounds included. MIN and MAX are durations with no sign and no
-// spaces around the one hyphen. A duration gives min == max, and ""
-// gives 0, 0. Neither may be negative, and min must not exceed max.
+// spaces around the one hyphen. A duration gives lo == hi, and ""
+// gives 0, 0. Neither may be negative, and lo must not exceed hi.
 // Parse validates v2 think_time values with it; v1 never does.
-func ParseThinkTime(s string) (min, max time.Duration, err error) {
+func ParseThinkTime(s string) (lo, hi time.Duration, err error) {
 	if s == "" {
 		return 0, 0, nil
 	}
@@ -29,22 +29,22 @@ func ParseThinkTime(s string) (min, max time.Duration, err error) {
 	if i == 0 {
 		return 0, 0, thinkTimeSyntax(s)
 	}
-	lo, hi := s[:i], s[i+1:]
+	a, b := s[:i], s[i+1:]
 	// Signs belong to neither half: "1s--3s" is malformed, not reversed.
-	if lo[0] == '+' || hi == "" || hi[0] == '+' || hi[0] == '-' {
+	if a[0] == '+' || b == "" || b[0] == '+' || b[0] == '-' {
 		return 0, 0, thinkTimeSyntax(s)
 	}
-	min, err1 := time.ParseDuration(lo)
-	max, err2 := time.ParseDuration(hi)
+	lo, err1 := time.ParseDuration(a)
+	hi, err2 := time.ParseDuration(b)
 	switch {
 	case err1 != nil || err2 != nil:
 		return 0, 0, thinkTimeSyntax(s)
-	case min < 0 || lo[0] == '-':
+	case lo < 0 || a[0] == '-':
 		return 0, 0, errNegativeThinkTime
-	case min > max:
+	case lo > hi:
 		return 0, 0, fmt.Errorf("must give the shorter duration first, got %s", quoteShort(s))
 	}
-	return min, max, nil
+	return lo, hi, nil
 }
 
 func thinkTimeSyntax(s string) error {
