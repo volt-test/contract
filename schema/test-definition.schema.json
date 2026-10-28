@@ -241,6 +241,28 @@
               ]
             }
           ]
+        },
+        "pick": {
+          "anyOf": [
+            {
+              "properties": {
+                "pick": {
+                  "maxLength": 0
+                }
+              }
+            },
+            {
+              "properties": {
+                "type": {
+                  "enum": [
+                    "json",
+                    "regex",
+                    "html"
+                  ]
+                }
+              }
+            }
+          ]
         }
       },
       "properties": {
@@ -271,7 +293,7 @@
         },
         "required": {
           "type": "boolean",
-          "description": "Treat a miss (nothing found) as a failed check labelled\n\"extract \u003cvariable_name\u003e\". Required or not, an extractor always\nassigns its variable; a miss assigns \"\"."
+          "description": "Treat a miss (nothing found, or a JSON null) as a failed check\nlabelled \"extract \u003cvariable_name\u003e\". Required or not, an extractor\nalways assigns its variable; a miss assigns \"\"."
         },
         "on_fail": {
           "anyOf": [
@@ -288,6 +310,23 @@
           ],
           "type": "string",
           "description": "What a miss does when required is true: \"record\", \"fail\" or \"abort\"\n(the default). Only applies with required: true."
+        },
+        "pick": {
+          "anyOf": [
+            {
+              "enum": [
+                "random",
+                "first",
+                "last",
+                "all"
+              ]
+            },
+            {
+              "maxLength": 0
+            }
+          ],
+          "type": "string",
+          "description": "Which value to take when the selector finds several or an array, for\ntypes json, regex and html: \"random\", \"first\", \"last\" or \"all\" (every\nvalue as a JSON array)."
         }
       },
       "additionalProperties": false,

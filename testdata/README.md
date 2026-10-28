@@ -21,7 +21,8 @@ the v1 engines read and loses nothing on a round trip.
   `thresholds_ignored.json` has `thresholds` keys at every level, which
   v1 readers ignore and the v1 path drops unread; `checks_ignored.json`
   does the same for `checks`, `expected_statuses` and the extractor keys
-  `required` and `on_fail`, some of them with values v2 rejects;
+  `required`, `on_fail` and `pick`, some of them with values v2 rejects
+  (including `pick` on a header extractor);
   `http_tls_ignored.json` does the same for `http`, `tls` and a step's
   `follow_redirects` and `max_redirects`, with values v2 rejects (a
   negative `max_redirects`, unknown versions, a key without a
@@ -51,7 +52,9 @@ one, contains "secret".
 
 - `valid/`: definitions that both `Parse` and the published schema accept.
   `checks.json` has every check type and operator, every `on_fail` value
-  and the `""` default, required and optional extractors,
+  and the `""` default, required and optional extractors, every `pick`
+  value on `json` extractors, `pick` on `regex` and `html` extractors,
+  `"pick": ""` on a header extractor,
   `expected_statuses`, keys written with their zero value (`""`, `[]`),
   `equals: ""`, and label edge cases: `<`, `>`, `&`, `\u` escapes
   (including U+2028), a 19-digit number, `1.50`, `-1e3`, and two header
@@ -81,7 +84,8 @@ one, contains "secret".
   - `structure_*`: a structural rule, such as a missing name or load model.
   - Checks, required extractors and `expected_statuses` have their own
     families: `structure_check_*`, `type_check_*`, `structure_extract_*`
-    (`on_fail` without `required: true`, or a bad value),
+    (`on_fail` without `required: true`, a bad `on_fail` or `pick`, or
+    `pick` on a header extractor),
     `type_extract_*`, `structure_expected_statuses_*` and
     `type_expected_statuses_*`. Each is a minimal definition with
     exactly one thing wrong; `checkFixtureProblems` in

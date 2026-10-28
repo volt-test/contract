@@ -1,0 +1,27 @@
+{
+  "schema_version": "2.0",
+  "name": "Invalid pick",
+  "virtual_users": 1,
+  "scenarios": [
+    {
+      "name": "S",
+      "steps": [
+        {
+          "name": "A",
+          "request": {
+            "method": "GET",
+            "url": "https://example.com/items"
+          },
+          "extract": [
+            {
+              "variable_name": "id",
+              "selector": "$.items[*].id",
+              "type": "json",
+              "pick": "any"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

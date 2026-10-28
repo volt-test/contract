@@ -24,14 +24,22 @@
               "selector": "$.data[0].id",
               "type": "json",
               "required": true,
-              "on_fail": "abort"
+              "on_fail": "abort",
+              "pick": "all"
             },
             {
               "variable_name": "cursor",
               "selector": "$.meta.cursor",
               "type": "json",
               "required": false,
-              "on_fail": "explode"
+              "on_fail": "explode",
+              "pick": "explode"
+            },
+            {
+              "variable_name": "etag",
+              "selector": "ETag",
+              "type": "header",
+              "pick": "first"
             }
           ],
           "checks": [

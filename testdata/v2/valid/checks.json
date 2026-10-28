@@ -45,6 +45,10 @@
             "method": "GET",
             "url": "/search?q=caf%C3%A9"
           },
+          "extract": [
+            { "variable_name": "last_count", "selector": "results?: (\\d+)", "type": "regex", "pick": "last" },
+            { "variable_name": "counts", "selector": "results?: (\\d+)", "type": "regex", "pick": "all", "required": true, "on_fail": "record" }
+          ],
           "checks": [
             { "type": "body", "equals": "<p>Caf\u00e9 & Bar > Shop</p>" },
             { "type": "body", "contains": "Caf\u00e9 \u2028 <b>" },
@@ -64,8 +68,12 @@
           "extract": [
             { "variable_name": "first_id", "selector": "data.items[0].id", "type": "json", "required": true },
             { "variable_name": "cursor", "selector": "meta.cursor", "type": "json", "required": true, "on_fail": "record" },
-            { "variable_name": "etag", "selector": "ETag", "type": "header", "required": false, "on_fail": "" },
-            { "variable_name": "page", "selector": "meta.page", "type": "json" }
+            { "variable_name": "etag", "selector": "ETag", "type": "header", "required": false, "on_fail": "", "pick": "" },
+            { "variable_name": "page", "selector": "meta.page", "type": "json" },
+            { "variable_name": "ids", "selector": "$.data.items[*].id", "type": "json", "required": true, "pick": "all" },
+            { "variable_name": "any_id", "selector": "$.data.items[*].id", "type": "json", "pick": "random" },
+            { "variable_name": "first_tag", "selector": "$.data.tags", "type": "json", "pick": "first" },
+            { "variable_name": "last_tag", "selector": "$.data.tags", "type": "json", "pick": "last" }
           ],
           "checks": [
             { "type": "json", "selector": "$.data.items[0].id", "exists": true },
@@ -93,6 +101,10 @@
             "method": "GET",
             "url": "/"
           },
+          "extract": [
+            { "variable_name": "product_link", "selector": "a.product", "attribute": "href", "type": "html", "pick": "random" },
+            { "variable_name": "titles", "selector": "h2.title", "type": "html", "pick": "all" }
+          ],
           "checks": [
             { "type": "html", "selector": "form#login input[name=email]", "exists": true },
             { "type": "html", "selector": "h1", "equals": "Sale" },

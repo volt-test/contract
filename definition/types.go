@@ -384,14 +384,30 @@ type Extract struct {
 	// by the response or by any redirect followed to reach it ("cookie"),
 	// or the body as HTML ("html").
 	Type string `json:"type" jsonschema:"required,enum=json,enum=regex,enum=header,enum=cookie,enum=html"`
-	// Treat a miss (nothing found) as a failed check labelled
-	// "extract <variable_name>". Required or not, an extractor always
-	// assigns its variable; a miss assigns "".
+	// Treat a miss (nothing found, or a JSON null) as a failed check
+	// labelled "extract <variable_name>". Required or not, an extractor
+	// always assigns its variable; a miss assigns "".
 	Required bool `json:"required,omitempty" contract:"v2"`
 	// What a miss does when required is true: "record", "fail" or "abort"
 	// (the default). Only applies with required: true.
 	OnFail FailMode `json:"on_fail,omitempty" contract:"v2"`
+	// Which value to take when the selector finds several or an array, for
+	// types json, regex and html: "random", "first", "last" or "all" (every
+	// value as a JSON array).
+	Pick Pick `json:"pick,omitempty" contract:"v2"`
 }
+
+// Pick is which value an extractor takes when its selector matches more
+// than one.
+type Pick string
+
+// The picks.
+const (
+	PickRandom Pick = "random"
+	PickFirst  Pick = "first"
+	PickLast   Pick = "last"
+	PickAll    Pick = "all"
+)
 
 // Check is a v2 assertion on a step's response: a type, an optional
 // selector and exactly one operator. See Label for how a check is named in

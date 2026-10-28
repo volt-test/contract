@@ -1,0 +1,33 @@
+{
+  "schema_version": "2.0",
+  "name": "Pick on a header extractor",
+  "virtual_users": 1,
+  "scenarios": [
+    {
+      "name": "S",
+      "steps": [
+        {
+          "name": "A",
+          "request": {
+            "method": "GET",
+            "url": "https://example.com/items"
+          },
+          "extract": [
+            {
+              "variable_name": "ids",
+              "selector": "$.items[*].id",
+              "type": "json",
+              "pick": "all"
+            },
+            {
+              "variable_name": "etag",
+              "selector": "ETag",
+              "type": "header",
+              "pick": "first"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
