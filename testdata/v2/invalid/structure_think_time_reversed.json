@@ -1,0 +1,21 @@
+{
+  "schema_version": "2.0",
+  "name": "Think time",
+  "virtual_users": 1,
+  "duration": "30s",
+  "scenarios": [
+    {
+      "name": "Browse",
+      "steps": [
+        {
+          "name": "Home",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/"
+          },
+          "think_time": "3s-1s"
+        }
+      ]
+    }
+  ]
+}

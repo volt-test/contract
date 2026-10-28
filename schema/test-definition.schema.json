@@ -642,7 +642,7 @@
         },
         "think_time": {
           "type": "string",
-          "description": "Pause after each run of the scenario, e.g. \"1s\"."
+          "description": "Default think_time for each step that sets none: a duration or a\nrange such as \"1s-3s\"."
         },
         "auto_handle_cookies": {
           "type": "boolean",
@@ -731,7 +731,7 @@
         },
         "think_time": {
           "type": "string",
-          "description": "Pause after the step, e.g. \"500ms\"."
+          "description": "Pause after the step: a duration such as \"500ms\", or a range such\nas \"1s-3s\" for a uniformly random pause between the two, bounds\nincluded."
         },
         "thresholds": {
           "items": {

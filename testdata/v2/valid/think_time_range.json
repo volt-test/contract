@@ -1,0 +1,45 @@
+{
+  "schema_version": "2.0",
+  "name": "Think time ranges",
+  "virtual_users": 2,
+  "duration": "30s",
+  "scenarios": [
+    {
+      "name": "Browse",
+      "think_time": "1s-3s",
+      "steps": [
+        {
+          "name": "Home",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/"
+          }
+        },
+        {
+          "name": "Product",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/products/1"
+          },
+          "think_time": "500ms-2s"
+        },
+        {
+          "name": "Cart",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/cart"
+          },
+          "think_time": "250ms"
+        },
+        {
+          "name": "Search",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/search?q=shoes"
+          },
+          "think_time": "0-1m30s"
+        }
+      ]
+    }
+  ]
+}

@@ -51,7 +51,8 @@ does not mean module v2.
   JSON type, and the structure is validated:
   - a name, and at least one scenario with at least one step;
   - unique scenario names, and unique step names within a scenario;
-  - durations that parse ("30s", "1m30s");
+  - durations that parse ("30s", "1m30s"), and a `think_time` that is a
+    duration or a range such as "1s-3s" (see [Think time](#think-time));
   - a load model: non-empty `stages`, `virtual_users` (at least 1) with
     optional `duration` and `ramp_up`, or a `load` object (see
     [Arrival-rate load](#arrival-rate-load)), exactly one of them. Without
@@ -797,6 +798,36 @@ scenario skip the step and keep using them.
   `false` reads as absent.
 
 `once_per_vu` joined schema_version "2.0" while it is a preview.
+
+## Think time
+
+`think_time` is the pause after a step. A scenario's `think_time` is the
+default for each of its steps that sets none; a zero value counts as
+none. In v2 it is a duration, or a range for a random pause:
+
+```json
+{"name": "Browse", "think_time": "1s-3s", "steps": [
+  {"name": "Product", "think_time": "500ms-2s",
+   "request": {"method": "GET", "url": "https://shop.example.com/products/1"}},
+  {"name": "Cart", "think_time": "250ms",
+   "request": {"method": "GET", "url": "https://shop.example.com/cart"}}
+]}
+```
+
+- **Range.** `MIN-MAX`: two durations joined by one ASCII hyphen, with
+  no spaces and no sign on either. Each takes its unit (`"1-3s"` is
+  rejected), except a bare `0` (`"0-3s"`). `MIN` must not be negative
+  and must not exceed `MAX`; `"2s-2s"` is a fixed 2s.
+- **Draw.** The engine draws a uniformly random pause between `MIN` and
+  `MAX`, both included, each time the step runs, in every iteration,
+  whether the range is the step's or the scenario's.
+- **Rules.** `Parse` rejects a negative value, a reversed range and any
+  other form. `definition.ParseThinkTime` reads a value the way `Parse`
+  validates it and returns the two bounds (equal for a duration).
+- **v1.** v1 never validates `think_time`: `Parse` keeps a range or a
+  negative value as written, and the engines read a range as no pause.
+
+Think time ranges joined schema_version "2.0" while it is a preview.
 
 ## Compatibility
 

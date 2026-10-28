@@ -277,4 +277,16 @@
 // scenario, and on every step of a load scenario. The README section
 // "Once-per-VU steps" gives the full rules. once_per_vu joined
 // schema_version "2.0" while it is a preview.
+//
+// # Think time (v2)
+//
+// A Step's ThinkTime is the pause after it, and a Scenario's ThinkTime is
+// the default for each step that sets none (a zero value counts as none).
+// In v2 it is a duration such as "500ms", or a range "MIN-MAX" such as
+// "1s-3s": two durations with units (a bare "0" aside) joined by one
+// hyphen, no spaces and no sign, with 0 <= MIN <= MAX. The engine draws
+// a uniformly random pause between the bounds, both included, each time
+// the step runs. ParseThinkTime reads a value as Parse validates it. v1
+// never validates think_time: Parse keeps a range or a negative value as
+// written. Ranges joined schema_version "2.0" while it is a preview.
 package definition
