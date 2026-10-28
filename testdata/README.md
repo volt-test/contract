@@ -95,6 +95,10 @@ one, contains "secret".
   `once_per_vu: false` written out in both kinds of scenario. The other
   accepted cases are in `TestOncePerVURules` in
   `definition/once_per_vu_test.go`.
+  `think_time_range.json` has a `think_time` range on a scenario and on a
+  step, a fixed step value and a range from a bare `0`. The other accepted
+  and rejected forms are in `TestParseThinkTime` in
+  `definition/think_time_test.go`.
 - `invalid/`: definitions `Parse` rejects, run through the schema as well.
   - `unknown_*`: unknown or v1-only keys added to a valid definition. The
     expected paths are listed in `definition/parse_v2_test.go`.
@@ -152,6 +156,12 @@ one, contains "secret".
     They cover `once_per_vu` in a `run_once` scenario and in a
     `teardown` scenario, on every step of a load scenario, and of the
     wrong JSON type.
+  - Think time ranges have the family `structure_think_time_*`:
+    `thinkTimeFixtureProblems` in `definition/think_time_test.go` lists
+    the problem each must produce, and the test fails on an unlisted
+    fixture of the family. They cover a reversed range, spaces around the
+    hyphen, a bound without a unit, a negative minimum and a missing
+    maximum.
   The schema rejects all of them except the cases listed, with reasons, in
   `knownSchemaLooser` in `definition/schema_test.go`.
 

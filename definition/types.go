@@ -277,7 +277,8 @@ type Scenario struct {
 	// Relative chance that a virtual user runs this scenario. Not allowed
 	// on a run_once or teardown scenario.
 	Weight int `json:"weight,omitempty" jsonschema:"minimum=0"`
-	// Pause after each run of the scenario, e.g. "1s".
+	// Default think_time for each step that sets none: a duration or a
+	// range such as "1s-3s".
 	ThinkTime string `json:"think_time,omitempty"`
 	// Keep cookies between the steps of a run.
 	AutoHandleCookies bool `json:"auto_handle_cookies,omitempty"`
@@ -334,7 +335,9 @@ type Step struct {
 	Checks []Check `json:"checks,omitempty" contract:"v2"`
 	// Validate holds the v1 response checks.
 	Validate []LegacyValidator `json:"validate,omitempty" contract:"v1" jsonschema:"-"`
-	// Pause after the step, e.g. "500ms".
+	// Pause after the step: a duration such as "500ms", or a range such
+	// as "1s-3s" for a uniformly random pause between the two, bounds
+	// included.
 	ThinkTime string `json:"think_time,omitempty"`
 	// Pass/fail rules for this step, e.g. "p99 < 1s".
 	Thresholds []ThresholdConfig `json:"thresholds,omitempty" contract:"v2"`

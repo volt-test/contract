@@ -211,7 +211,7 @@ func TestV2Problems(t *testing.T) {
 			"ramp_up: must not be negative",
 			`http_timeout: must be a duration such as "30s" or "1m30s", got "fast"`,
 			`target.idle_timeout: must be a duration such as "30s" or "1m30s", got "1 m"`,
-			`scenarios[0].think_time: must be a duration such as "30s" or "1m30s", got "1x"`,
+			`scenarios[0].think_time: must be a duration such as "500ms" or a range such as "1s-3s", got "1x"`,
 		}},
 		{"stages with constant load", func(m map[string]any) {
 			m["stages"] = []any{map[string]any{"duration": "10s", "target": 5}}

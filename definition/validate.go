@@ -104,7 +104,7 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 		ps.uniqueName(p, sc.Name, scenarioNames, i, "scenarios")
 		ps.nonNegative(p+".weight", sc.Weight)
 		validateSetupTeardown(&ps, p, sc)
-		ps.duration(p+".think_time", sc.ThinkTime)
+		ps.thinkTime(p+".think_time", sc.ThinkTime)
 		if sc.DataConfig != nil {
 			validateDataConfig(&ps, p+".data_config", sc.DataConfig)
 		}
@@ -115,7 +115,7 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 		for j, st := range sc.Steps {
 			sp := p + ".steps[" + strconv.Itoa(j) + "]"
 			ps.uniqueName(sp, st.Name, stepNames, j, p+".steps")
-			ps.duration(sp+".think_time", st.ThinkTime)
+			ps.thinkTime(sp+".think_time", st.ThinkTime)
 			if strings.TrimSpace(st.Request.Method) == "" {
 				ps.add(sp+".request.method", "is required")
 			}

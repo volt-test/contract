@@ -77,3 +77,20 @@ func FuzzParse(f *testing.F) {
 		}
 	})
 }
+
+// FuzzParseThinkTime checks that ParseThinkTime never panics and that an
+// accepted value gives 0 <= min <= max.
+func FuzzParseThinkTime(f *testing.F) {
+	for _, s := range []string{"", "-", "0", "500ms", "-1s", "1s-3s", "0-3s", "3s-1s", "1s--3s", "1s-", "-1s-3s", "1s–3s"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		min, max, err := definition.ParseThinkTime(s)
+		if err != nil {
+			return
+		}
+		if min < 0 || min > max {
+			t.Fatalf("ParseThinkTime(%q) = %v, %v", s, min, max)
+		}
+	})
+}

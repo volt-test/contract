@@ -440,6 +440,12 @@ var knownSchemaLooser = map[string]string{
 
 	"structure_run_once_global_extracted.json":   "a run_once global extracted by another scenario compares extractors across scenarios",
 	"structure_run_once_global_by_run_once.json": "a run_once global extracted by another scenario compares extractors across scenarios",
+
+	"structure_think_time_reversed.json":        "durations are plain strings in the schema",
+	"structure_think_time_whitespace.json":      "durations are plain strings in the schema",
+	"structure_think_time_missing_unit.json":    "durations are plain strings in the schema",
+	"structure_think_time_negative_min.json":    "durations are plain strings in the schema",
+	"structure_think_time_trailing_hyphen.json": "durations are plain strings in the schema",
 }
 
 // TestSchemaAgreesWithParse checks that the schema and Parse agree on
