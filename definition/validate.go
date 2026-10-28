@@ -155,6 +155,10 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 			}
 			checkLabels(&ps, sp, st)
 			validateStepRedirects(&ps, sp, st, follows)
+			validateOncePerVU(&ps, sp, sc, st)
+		}
+		if sc.IsLoad() && len(sc.Steps) > 0 && allOncePerVU(sc.Steps) {
+			ps.add(p+".steps", "must have at least one step without once_per_vu")
 		}
 	}
 	if len(d.Scenarios) > 0 && !hasLoadScenario(d.Scenarios) {
@@ -178,6 +182,31 @@ func validateSetupTeardown(ps *problems, p string, sc Scenario) {
 			ps.add(p+".weight", "does not apply to a teardown scenario, which is never picked for the load")
 		}
 	}
+}
+
+// validateOncePerVU rejects once_per_vu on a step of a run_once or
+// teardown scenario, which runs once anyway. false reads as absent.
+func validateOncePerVU(ps *problems, sp string, sc Scenario, st Step) {
+	if !st.OncePerVU {
+		return
+	}
+	switch {
+	case sc.RunOnce:
+		ps.add(sp+".once_per_vu", "does not apply to a run_once scenario, which runs once")
+	case sc.Teardown:
+		ps.add(sp+".once_per_vu", "does not apply to a teardown scenario, which runs once")
+	}
+}
+
+// allOncePerVU reports whether every step has once_per_vu, which would
+// leave later iterations of a load scenario with nothing to run.
+func allOncePerVU(steps []Step) bool {
+	for _, st := range steps {
+		if !st.OncePerVU {
+			return false
+		}
+	}
+	return true
 }
 
 // setupGlobals maps each variable a run_once scenario extracts to the

@@ -531,6 +531,41 @@
       "description": "An HTTP request. The URL, body and header values may contain ${variable} references."
     },
     "Scenario": {
+      "anyOf": [
+        {
+          "properties": {
+            "run_once": {
+              "const": true
+            }
+          },
+          "required": [
+            "run_once"
+          ]
+        },
+        {
+          "properties": {
+            "teardown": {
+              "const": true
+            }
+          },
+          "required": [
+            "teardown"
+          ]
+        },
+        {
+          "properties": {
+            "steps": {
+              "contains": {
+                "properties": {
+                  "once_per_vu": {
+                    "const": false
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
       "dependentSchemas": {
         "run_once": {
           "anyOf": [
@@ -548,6 +583,15 @@
                 },
                 "weight": {
                   "maximum": 0
+                },
+                "steps": {
+                  "items": {
+                    "properties": {
+                      "once_per_vu": {
+                        "const": false
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -566,6 +610,15 @@
               "properties": {
                 "weight": {
                   "maximum": 0
+                },
+                "steps": {
+                  "items": {
+                    "properties": {
+                      "once_per_vu": {
+                        "const": false
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -695,6 +748,10 @@
           "type": "integer",
           "minimum": 0,
           "description": "Overrides http.max_redirects for this step (0 or absent means the\ntest-level value). Only applies when the step follows redirects."
+        },
+        "once_per_vu": {
+          "type": "boolean",
+          "description": "Run the step only on a virtual user's first iteration of this\nscenario, and again on the next iteration while it fails or any of\nits extractors misses. The variables it extracts stay set for later\niterations, which skip the step. Not allowed in a run_once or\nteardown scenario."
         }
       },
       "additionalProperties": false,

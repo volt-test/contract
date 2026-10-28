@@ -102,6 +102,7 @@ func generateSchema(t *testing.T) []byte {
 	}
 	checkSchemaRules(t, s)
 	setupTeardownRules(t, s)
+	oncePerVURules(t, s)
 
 	b, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
@@ -261,6 +262,45 @@ func setupTeardownRules(t *testing.T, s *jsonschema.Schema) {
 		t.Fatal("schema has no property scenarios")
 	}
 	list.Contains = props("run_once", off(), "teardown", off())
+}
+
+// oncePerVURules adds the once_per_vu rules: not on a step of a run_once
+// or teardown scenario, and a load scenario needs at least one step
+// without it. false reads as absent. It extends the dependentSchemas that
+// setupTeardownRules sets, so it runs after it.
+func oncePerVURules(t *testing.T, s *jsonschema.Schema) {
+	t.Helper()
+	if _, ok := s.Definitions["Step"].Properties.Get("once_per_vu"); !ok {
+		t.Fatal("schema has no property Step.once_per_vu")
+	}
+	scenario := s.Definitions["Scenario"]
+	notOnce := func() *jsonschema.Schema {
+		p := jsonschema.NewProperties()
+		p.Set("once_per_vu", &jsonschema.Schema{Const: false})
+		return &jsonschema.Schema{Properties: p}
+	}
+	// In the branch where the flag is on (the last one), every step
+	// leaves once_per_vu off.
+	for _, k := range []string{"run_once", "teardown"} {
+		dep, ok := scenario.DependentSchemas[k]
+		if !ok || len(dep.AnyOf) != 2 {
+			t.Fatalf("Scenario.dependentSchemas.%s is not the two-branch anyOf setupTeardownRules writes", k)
+		}
+		on := dep.AnyOf[1]
+		if on.Properties == nil {
+			on.Properties = jsonschema.NewProperties()
+		}
+		on.Properties.Set("steps", &jsonschema.Schema{Items: notOnce()})
+	}
+	// A load scenario (neither flag true) has a step without once_per_vu.
+	flag := func(k string) *jsonschema.Schema {
+		p := jsonschema.NewProperties()
+		p.Set(k, &jsonschema.Schema{Const: true})
+		return &jsonschema.Schema{Required: []string{k}, Properties: p}
+	}
+	steps := jsonschema.NewProperties()
+	steps.Set("steps", &jsonschema.Schema{Contains: notOnce()})
+	scenario.AnyOf = []*jsonschema.Schema{flag("run_once"), flag("teardown"), {Properties: steps}}
 }
 
 // thresholdSchema describes a threshold: the expression string, or the

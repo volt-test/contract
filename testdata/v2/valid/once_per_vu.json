@@ -1,0 +1,97 @@
+{
+  "schema_version": "2.0",
+  "name": "Once-per-VU steps",
+  "virtual_users": 2,
+  "duration": "30s",
+  "scenarios": [
+    {
+      "name": "Seed",
+      "run_once": true,
+      "steps": [
+        {
+          "name": "Reset catalog",
+          "once_per_vu": false,
+          "request": {
+            "method": "POST",
+            "url": "https://shop.example.com/api/reset"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Shop",
+      "weight": 3,
+      "steps": [
+        {
+          "name": "Login",
+          "once_per_vu": true,
+          "request": {
+            "method": "POST",
+            "url": "https://shop.example.com/api/login",
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "body": "{\"email\":\"user@example.com\",\"password\":\"example-password\"}"
+          },
+          "extract": [
+            {
+              "variable_name": "token",
+              "selector": "$.data.token",
+              "type": "json",
+              "required": true,
+              "on_fail": "abort"
+            }
+          ],
+          "think_time": "1s"
+        },
+        {
+          "name": "Cart",
+          "once_per_vu": false,
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/api/cart",
+            "headers": {
+              "Authorization": "Bearer ${token}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "weight": 1,
+      "steps": [
+        {
+          "name": "Admin login",
+          "once_per_vu": true,
+          "request": {
+            "method": "POST",
+            "url": "https://shop.example.com/api/admin/login",
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "body": "{\"email\":\"admin@example.com\",\"password\":\"example-password\"}"
+          },
+          "extract": [
+            {
+              "variable_name": "admin_token",
+              "selector": "$.data.token",
+              "type": "json",
+              "required": true
+            }
+          ]
+        },
+        {
+          "name": "Orders",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/api/admin/orders",
+            "headers": {
+              "Authorization": "Bearer ${admin_token}"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

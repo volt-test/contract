@@ -25,7 +25,7 @@ func v2OnlyDropped(path string) bool {
 	for _, prefix := range []string{"thresholds[]", "scenarios[].thresholds[]", "scenarios[].steps[].thresholds[]", "scenarios[].run_once", "scenarios[].teardown", "target.base_url",
 		"expected_statuses[]", "scenarios[].steps[].checks", "scenarios[].steps[].extract[].required",
 		"scenarios[].steps[].extract[].on_fail", "scenarios[].steps[].extract[].pick", "http", "tls", "scenarios[].steps[].follow_redirects",
-		"scenarios[].steps[].max_redirects", "load"} {
+		"scenarios[].steps[].max_redirects", "scenarios[].steps[].once_per_vu", "load"} {
 		if p == prefix || strings.HasPrefix(p, prefix+".") || strings.HasPrefix(p, prefix+"[") {
 			return true
 		}

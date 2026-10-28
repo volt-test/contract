@@ -343,6 +343,12 @@ type Step struct {
 	// Overrides http.max_redirects for this step (0 or absent means the
 	// test-level value). Only applies when the step follows redirects.
 	MaxRedirects int `json:"max_redirects,omitempty" contract:"v2" jsonschema:"minimum=0"`
+	// Run the step only on a virtual user's first iteration of this
+	// scenario, and again on the next iteration while it fails or any of
+	// its extractors misses. The variables it extracts stay set for later
+	// iterations, which skip the step. Not allowed in a run_once or
+	// teardown scenario.
+	OncePerVU bool `json:"once_per_vu,omitempty" contract:"v2"`
 }
 
 // Request is an HTTP request template. URL, Body and header values may

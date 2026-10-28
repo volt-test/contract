@@ -17,9 +17,9 @@
 // way the v1 readers read it: unknown keys are ignored, keys match
 // case-insensitively, and v2-only keys (contract:"v2", such as
 // target.base_url, thresholds, expected_statuses, http, tls, load, a
-// scenario's run_once and teardown, a step's checks, follow_redirects and
-// max_redirects, and an extractor's required, on_fail and pick) are
-// dropped unread. Values are checked for their
+// scenario's run_once and teardown, a step's checks, follow_redirects,
+// max_redirects and once_per_vu, and an extractor's required, on_fail and
+// pick) are dropped unread. Values are checked for their
 // JSON type only, with two classes of field:
 //
 //   - Core fields are decoded by every v1 reader (the headless CLI, the
@@ -260,5 +260,21 @@
 // and any other scenario extracting a variable a setup scenario extracts.
 // VoltTest Cloud does not run them yet. The README section "Setup and
 // teardown" gives the full rules. run_once and teardown joined
+// schema_version "2.0" while it is a preview.
+//
+// # Once-per-VU steps (v2)
+//
+// A Step with OncePerVU runs on a virtual user's first iteration of its
+// scenario only; the virtual user tracks each such step per scenario, and
+// a reused arrival-rate virtual user does not run it again. The step is
+// done only when it succeeded and every extractor on it hit; otherwise it
+// runs again on the virtual user's next iteration of the scenario. Its
+// variables are never reset by later iterations, which skip it, though a
+// CSV column or another extractor of the same name still overwrites them.
+// Its requests count under its own name in every total, check and
+// threshold, and iteration_duration leaves out its time, think_time
+// included. Parse rejects OncePerVU on a step of a run_once or teardown
+// scenario, and on every step of a load scenario. The README section
+// "Once-per-VU steps" gives the full rules. once_per_vu joined
 // schema_version "2.0" while it is a preview.
 package definition

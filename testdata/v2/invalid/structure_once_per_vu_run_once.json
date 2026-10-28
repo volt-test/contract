@@ -1,0 +1,34 @@
+{
+  "schema_version": "2.0",
+  "name": "once_per_vu in a run_once scenario",
+  "virtual_users": 2,
+  "duration": "30s",
+  "scenarios": [
+    {
+      "name": "Setup",
+      "run_once": true,
+      "steps": [
+        {
+          "name": "Get home",
+          "once_per_vu": true,
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Home",
+      "steps": [
+        {
+          "name": "Get home",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -97,6 +97,7 @@ var v1ReadSet = map[string]string{
 	"tls":                                    "v2",
 	"scenarios[].steps[].follow_redirects":   "v2",
 	"scenarios[].steps[].max_redirects":      "v2",
+	"scenarios[].steps[].once_per_vu":        "v2",
 	"load":                                   "v2",
 }
 
@@ -821,6 +822,62 @@ func TestV1DropsSetupTeardownKeys(t *testing.T) {
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s: v1 with run_once and teardown:\n got %+v\nwant %+v", name, got, want)
+		}
+	}
+}
+
+// TestV1DropsOncePerVUKey checks that once_per_vu_ignored.json, a v1
+// definition with once_per_vu on every step of a scenario (which v2
+// rejects), parses exactly as it does without the key, and so do mistyped
+// values and other spellings of it.
+func TestV1DropsOncePerVUKey(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "testdata", "v1", "cli", "once_per_vu_ignored.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stripped := withoutV2OnlyKeys(t, raw)
+	if !bytes.Contains(raw, []byte(`"once_per_vu"`)) || bytes.Contains(stripped, []byte(`"once_per_vu"`)) {
+		t.Fatalf("the fixture's once_per_vu keys were not removed: %s", stripped)
+	}
+	want, err := Parse(stripped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(want.Scenarios) != 1 || len(want.Scenarios[0].Steps) != 2 || want.Scenarios[0].Steps[0].Extract[0].VariableName != "token" {
+		t.Fatalf("scenarios = %+v; the keys next to once_per_vu must still be read", want.Scenarios)
+	}
+	docs := map[string][]byte{"fixture": raw}
+	for name, key := range map[string]string{
+		"string":       `"once_per_vu":"yes",`,
+		"number":       `"once_per_vu":1,`,
+		"null":         `"once_per_vu":null,`,
+		"object":       `"once_per_vu":{},`,
+		"array":        `"once_per_vu":[true],`,
+		"case variant": `"Once_Per_VU":true,`,
+		"upper case":   `"ONCE_PER_VU":true,`,
+	} {
+		docs[name] = bytes.Replace(stripped, []byte(`"name":"Login"`), []byte(key+`"name":"Login"`), 1)
+	}
+	for name, doc := range docs {
+		if !bytes.Contains(bytes.ToLower(doc), []byte(`"once_per_vu":`)) {
+			t.Fatalf("%s: no once_per_vu key: %s", name, doc)
+		}
+		got, err := Parse(doc)
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", name, err, doc)
+		}
+		if !got.IsV1() || len(got.V1TypeProblems) != 0 {
+			t.Errorf("%s: IsV1 %v, V1TypeProblems %v", name, got.IsV1(), got.V1TypeProblems)
+		}
+		for _, sc := range got.Scenarios {
+			for _, st := range sc.Steps {
+				if st.OncePerVU {
+					t.Errorf("%s: step %s kept once_per_vu", name, st.Name)
+				}
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: v1 with once_per_vu:\n got %+v\nwant %+v", name, got, want)
 		}
 	}
 }

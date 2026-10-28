@@ -32,8 +32,11 @@ v2 and later definitions carry `schema_version` as a `"MAJOR.MINOR"` string.
   minor. [Checks](#checks), `expected_statuses`, the extractor keys
   `required`, `on_fail` and [`pick`](#extracting-from-arrays), and the
   [HTTP and TLS options](#http-and-tls-options) (`http`, `tls` and a
-  step's `follow_redirects` and `max_redirects`) and the [arrival-rate
-  load](#arrival-rate-load) (`load`) joined `"2.0"` under this rule.
+  step's `follow_redirects` and `max_redirects`), the [arrival-rate
+  load](#arrival-rate-load) (`load`), [setup and
+  teardown](#setup-and-teardown) scenarios (`run_once`, `teardown`) and
+  [once-per-VU steps](#once-per-vu-steps) (`once_per_vu`) joined `"2.0"`
+  under this rule.
 - A reader rejects an unknown major, or a minor newer than it supports.
 
 The module version and `schema_version` move independently: schema `"2.0"`
@@ -59,6 +62,9 @@ does not mean module v2.
     either, at least one load scenario, and no other scenario extracting a
     variable a `run_once` scenario sets (see [Setup and
     teardown](#setup-and-teardown));
+  - `once_per_vu` not on a step of a `run_once` or `teardown` scenario,
+    and at least one step without it in every load scenario (see
+    [Once-per-VU steps](#once-per-vu-steps));
   - known extractor types, data formats and data modes, and an
     extractor's `pick` from its list, on `json`, `regex` and `html`
     extractors only (see [Extracting from arrays](#extracting-from-arrays));
@@ -80,7 +86,8 @@ does not mean module v2.
   and v2-only keys (`target.base_url`, `thresholds` at every level,
   `expected_statuses`, `http`, `tls`, `load`, a scenario's `run_once` and
   `teardown`, a step's `checks`,
-  `follow_redirects` and `max_redirects`, and an extractor's `required`,
+  `follow_redirects`, `max_redirects` and `once_per_vu`, and an
+  extractor's `required`,
   `on_fail` and `pick`) are dropped unread, whatever their value. Values are
   checked for their JSON type only:
   - **core** fields, which every v1 reader decodes: a value of the wrong
@@ -731,6 +738,65 @@ run its load scenario once.)
 
 `run_once` and `teardown` joined schema_version "2.0" while it is a
 preview.
+
+## Once-per-VU steps
+
+A step with `"once_per_vu": true` runs on a virtual user's first
+iteration of its scenario only, typically a login. The variables it
+extracts stay set, and the virtual user's later iterations of that
+scenario skip the step and keep using them.
+
+```json
+"steps": [
+  {
+    "name": "Login",
+    "once_per_vu": true,
+    "request": {"method": "POST", "url": "https://shop.example.com/api/login",
+                "headers": {"Content-Type": "application/json"},
+                "body": "{\"email\":\"user@example.com\"}"},
+    "extract": [{"variable_name": "token", "selector": "$.data.token",
+                 "type": "json", "required": true}]
+  },
+  {
+    "name": "Cart",
+    "request": {"method": "GET", "url": "https://shop.example.com/api/cart",
+                "headers": {"Authorization": "Bearer ${token}"}}
+  }
+]
+```
+
+- **First iteration.** Each virtual user tracks each once step of each
+  scenario on its own: a virtual user that runs two weighted scenarios
+  runs each scenario's once steps on its first iteration of that
+  scenario. With [`load`](#arrival-rate-load) the engine reuses idle
+  virtual users, so the step runs on a virtual user's first iteration,
+  not on every arrival. Virtual users added by a staged ramp-up are new
+  virtual users and run it on their first iteration.
+- **Retry.** The step is done only when it succeeded and every extractor
+  on it hit. Otherwise (a `fail` or `abort` check that fails, a required
+  or non-required extractor that misses, a transport error or an
+  unexpected status) the virtual user runs it again on its next
+  iteration of the scenario, until it is done. A failure that does not
+  abort still lets that iteration's later steps run, and an extractor
+  that missed assigns `""` (see [Required
+  extractors](#required-extractors)), so they see `""`, never a stale
+  value. A failing `record` check alone does not make the step run
+  again.
+- **Variables.** Later iterations never reset the step's variables. A
+  CSV column or another extractor with the same name still overwrites
+  them, as it would any variable.
+- **Results.** The step's requests count in every total (including
+  `rps`), in `check_rate` and in thresholds, under the step's own name.
+  `iteration_duration` leaves out the step's time, its `think_time`
+  included, so the first iteration is comparable with the others. An
+  iteration ended by an `abort` on the once step still counts as an
+  iteration, with the once step's time left out of its duration.
+- **Rules.** `Parse` rejects `once_per_vu` on a step of a `run_once` or
+  `teardown` scenario, which runs once anyway, and a load scenario
+  whose every step has it, which would leave later iterations empty.
+  `false` reads as absent.
+
+`once_per_vu` joined schema_version "2.0" while it is a preview.
 
 ## Compatibility
 
