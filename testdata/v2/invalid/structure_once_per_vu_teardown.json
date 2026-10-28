@@ -1,0 +1,41 @@
+{
+  "schema_version": "2.0",
+  "name": "once_per_vu in a teardown scenario",
+  "virtual_users": 2,
+  "duration": "30s",
+  "scenarios": [
+    {
+      "name": "Home",
+      "steps": [
+        {
+          "name": "Get home",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Clean up",
+      "teardown": true,
+      "steps": [
+        {
+          "name": "Get home",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/"
+          }
+        },
+        {
+          "name": "Delete cart",
+          "once_per_vu": true,
+          "request": {
+            "method": "DELETE",
+            "url": "https://shop.example.com/api/cart"
+          }
+        }
+      ]
+    }
+  ]
+}

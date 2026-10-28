@@ -34,7 +34,10 @@ the v1 engines read and loses nothing on a round trip.
   does the same for a scenario's `run_once` and `teardown`, with values v2
   rejects (both on one scenario, weights, no load scenario, a global
   extracted again); `TestV1DropsSetupTeardownKeys` checks it, and the
-  keys with the wrong JSON type or case.
+  keys with the wrong JSON type or case. `once_per_vu_ignored.json` does
+  the same for a step's `once_per_vu`, set on every step of a scenario
+  (which v2 rejects); `TestV1DropsOncePerVUKey` checks it, and the key
+  with the wrong JSON type or case.
 
 Every `*_ignored.json` fixture keeps the right JSON type for each value:
 `TestV1RewriteMatchesDirectDecode` decodes every v1 fixture with plain
@@ -86,6 +89,12 @@ one, contains "secret".
   without `duration`, so each virtual user runs its scenario once. The
   other accepted cases are in `TestSetupTeardownRules` in
   `definition/setup_teardown_test.go`.
+  `once_per_vu.json` has two weighted load scenarios, each with a login
+  step with `once_per_vu: true` and a required token extractor followed
+  by a step that reads the token, and a `run_once` scenario, with
+  `once_per_vu: false` written out in both kinds of scenario. The other
+  accepted cases are in `TestOncePerVURules` in
+  `definition/once_per_vu_test.go`.
 - `invalid/`: definitions `Parse` rejects, run through the schema as well.
   - `unknown_*`: unknown or v1-only keys added to a valid definition. The
     expected paths are listed in `definition/parse_v2_test.go`.
@@ -136,6 +145,13 @@ one, contains "secret".
     scenario, a weight on either, no load scenario, a global extracted
     again by a load scenario defined before the setup scenario or by a
     second setup scenario, and flags of the wrong JSON type.
+  - Once-per-VU steps have the families `structure_once_per_vu_*` and
+    `type_once_per_vu_*`: `oncePerVUFixtureProblems` in
+    `definition/once_per_vu_test.go` lists the problems each must
+    produce, and the test fails on an unlisted fixture of these families.
+    They cover `once_per_vu` in a `run_once` scenario and in a
+    `teardown` scenario, on every step of a load scenario, and of the
+    wrong JSON type.
   The schema rejects all of them except the cases listed, with reasons, in
   `knownSchemaLooser` in `definition/schema_test.go`.
 

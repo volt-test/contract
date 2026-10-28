@@ -1,0 +1,43 @@
+{
+  "name": "v1 definition with once_per_vu keys",
+  "virtual_users": 2,
+  "duration": "10s",
+  "scenarios": [
+    {
+      "name": "Login only",
+      "weight": 1,
+      "steps": [
+        {
+          "name": "Login",
+          "once_per_vu": true,
+          "request": {
+            "method": "POST",
+            "url": "https://api.example.com/login",
+            "header": {
+              "Content-Type": "application/json"
+            },
+            "body": "{\"email\":\"user@example.com\"}"
+          },
+          "extract": [
+            {
+              "variable_name": "token",
+              "selector": "$.token",
+              "type": "json"
+            }
+          ]
+        },
+        {
+          "name": "Items",
+          "once_per_vu": true,
+          "request": {
+            "method": "GET",
+            "url": "https://api.example.com/items",
+            "header": {
+              "Authorization": "Bearer ${token}"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
