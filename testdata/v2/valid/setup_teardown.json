@@ -1,0 +1,125 @@
+{
+  "schema_version": "2.0",
+  "name": "Setup and teardown",
+  "virtual_users": 2,
+  "duration": "30s",
+  "scenarios": [
+    {
+      "name": "Log in",
+      "run_once": true,
+      "teardown": false,
+      "weight": 0,
+      "steps": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "url": "https://shop.example.com/api/login",
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "body": "{\"email\":\"admin@example.com\",\"password\":\"example-password\"}"
+          },
+          "extract": [
+            {
+              "variable_name": "admin_token",
+              "selector": "$.data.token",
+              "type": "json",
+              "required": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Seed",
+      "run_once": true,
+      "steps": [
+        {
+          "name": "Seed product",
+          "request": {
+            "method": "POST",
+            "url": "https://shop.example.com/api/products",
+            "headers": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer ${admin_token}"
+            },
+            "body": "{\"name\":\"Load test product\"}"
+          },
+          "extract": [
+            {
+              "variable_name": "product_id",
+              "selector": "$.data.id",
+              "type": "json",
+              "required": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Browse",
+      "weight": 3,
+      "run_once": false,
+      "teardown": false,
+      "steps": [
+        {
+          "name": "Get product",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/api/products/${product_id}",
+            "headers": {
+              "Authorization": "Bearer ${admin_token}"
+            }
+          },
+          "extract": [
+            {
+              "variable_name": "price",
+              "selector": "$.data.price",
+              "type": "json"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Browse again",
+      "steps": [
+        {
+          "name": "Get product",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/api/products/${product_id}",
+            "headers": {
+              "Authorization": "Bearer ${admin_token}"
+            }
+          },
+          "extract": [
+            {
+              "variable_name": "price",
+              "selector": "$.data.price",
+              "type": "json"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Clean up",
+      "teardown": true,
+      "run_once": false,
+      "steps": [
+        {
+          "name": "Delete product",
+          "request": {
+            "method": "DELETE",
+            "url": "https://shop.example.com/api/products/${product_id}",
+            "headers": {
+              "Authorization": "Bearer ${admin_token}"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

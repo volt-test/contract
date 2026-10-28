@@ -1,0 +1,56 @@
+{
+  "schema_version": "2.0",
+  "name": "Global extracted again",
+  "virtual_users": 2,
+  "duration": "30s",
+  "scenarios": [
+    {
+      "name": "Browse",
+      "steps": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "url": "https://shop.example.com/api/login",
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "body": "{}"
+          },
+          "extract": [
+            {
+              "variable_name": "admin_token",
+              "selector": "$.data.token",
+              "type": "json"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Setup",
+      "run_once": true,
+      "steps": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "url": "https://shop.example.com/api/login",
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "body": "{\"email\":\"admin@example.com\",\"password\":\"example-password\"}"
+          },
+          "extract": [
+            {
+              "variable_name": "admin_token",
+              "selector": "$.data.token",
+              "type": "json",
+              "required": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -101,6 +101,7 @@ func generateSchema(t *testing.T) []byte {
 		{Required: []string{"data_content"}},
 	}
 	checkSchemaRules(t, s)
+	setupTeardownRules(t, s)
 
 	b, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
@@ -222,6 +223,44 @@ func checkSchemaRules(t *testing.T, s *jsonschema.Schema) {
 	// Parse's alone; see knownSchemaLooser.
 	optionalEnum(prop(s.Definitions["HTTPOptions"], "version"), definition.HTTPVersionsForTest)
 	optionalEnum(prop(s.Definitions["TLSOptions"], "min_version"), definition.TLSVersionsForTest)
+}
+
+// setupTeardownRules adds the run_once and teardown rules a JSON Schema can
+// state: not both on one scenario, no weight on either, and at least one
+// load scenario. false reads as absent. The rule that no other scenario
+// extracts a run_once global is Parse's alone; see knownSchemaLooser.
+func setupTeardownRules(t *testing.T, s *jsonschema.Schema) {
+	t.Helper()
+	scenario := s.Definitions["Scenario"]
+	for _, k := range []string{"run_once", "teardown"} {
+		if _, ok := scenario.Properties.Get(k); !ok {
+			t.Fatalf("schema has no property Scenario.%s", k)
+		}
+	}
+	props := func(kv ...any) *jsonschema.Schema {
+		p := jsonschema.NewProperties()
+		for i := 0; i < len(kv); i += 2 {
+			p.Set(kv[i].(string), kv[i+1].(*jsonschema.Schema))
+		}
+		return &jsonschema.Schema{Properties: p}
+	}
+	off := func() *jsonschema.Schema { return &jsonschema.Schema{Const: false} }
+	noWeight := func() *jsonschema.Schema { return &jsonschema.Schema{Maximum: json.Number("0")} }
+	scenario.DependentSchemas = map[string]*jsonschema.Schema{
+		"run_once": {AnyOf: []*jsonschema.Schema{
+			props("run_once", off()),
+			props("teardown", off(), "weight", noWeight()),
+		}},
+		"teardown": {AnyOf: []*jsonschema.Schema{
+			props("teardown", off()),
+			props("weight", noWeight()),
+		}},
+	}
+	list, ok := s.Properties.Get("scenarios")
+	if !ok {
+		t.Fatal("schema has no property scenarios")
+	}
+	list.Contains = props("run_once", off(), "teardown", off())
 }
 
 // thresholdSchema describes a threshold: the expression string, or the
@@ -358,6 +397,9 @@ var knownSchemaLooser = map[string]string{
 	"structure_load_rate_duration_zero.json":          "durations are plain strings in the schema",
 	"structure_load_ramping_stage_zero_duration.json": "durations are plain strings in the schema",
 	"structure_load_max_vus_below_preallocated.json":  "max_vus >= preallocated_vus compares two keys",
+
+	"structure_run_once_global_extracted.json":   "a run_once global extracted by another scenario compares extractors across scenarios",
+	"structure_run_once_global_by_run_once.json": "a run_once global extracted by another scenario compares extractors across scenarios",
 }
 
 // TestSchemaAgreesWithParse checks that the schema and Parse agree on

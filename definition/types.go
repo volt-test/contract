@@ -64,7 +64,8 @@ type Definition struct {
 
 	// The system under test.
 	Target *Target `json:"target,omitempty"`
-	// Scenarios that virtual users run, picked at random by weight.
+	// Scenarios that virtual users run, picked at random by weight. A
+	// run_once or teardown scenario is never picked; it runs once.
 	Scenarios []Scenario `json:"scenarios" jsonschema:"required,minItems=1"`
 	// Share of the virtual users per cloud region.
 	RegionConfig []RegionWeight `json:"region_config,omitempty" contract:"loose"`
@@ -273,7 +274,8 @@ type Scenario struct {
 	Name string `json:"name" jsonschema:"required,pattern=\\S"`
 	// Free-text description of the scenario.
 	Description string `json:"description,omitempty"`
-	// Relative chance that a virtual user runs this scenario.
+	// Relative chance that a virtual user runs this scenario. Not allowed
+	// on a run_once or teardown scenario.
 	Weight int `json:"weight,omitempty" jsonschema:"minimum=0"`
 	// Pause after each run of the scenario, e.g. "1s".
 	ThinkTime string `json:"think_time,omitempty"`
@@ -285,7 +287,19 @@ type Scenario struct {
 	DataConfig *DataConfig `json:"data_config,omitempty"`
 	// Pass/fail rules for this scenario, e.g. "iteration_duration_p95 < 5s".
 	Thresholds []ThresholdConfig `json:"thresholds,omitempty" contract:"v2"`
+	// Setup: run the scenario once, by one virtual user, before the load
+	// starts. The variables it extracts are readable by every virtual user
+	// as ${variable}. Takes no weight and is never picked for the load.
+	RunOnce bool `json:"run_once,omitempty" contract:"v2"`
+	// Run the scenario once after every virtual user has stopped, with the
+	// setup variables readable, e.g. to delete seeded data. Takes no weight
+	// and is never picked for the load.
+	Teardown bool `json:"teardown,omitempty" contract:"v2"`
 }
+
+// IsLoad reports whether the scenario takes part in the load: it is
+// neither a run_once nor a teardown scenario.
+func (s Scenario) IsLoad() bool { return !s.RunOnce && !s.Teardown }
 
 // DataConfig is a scenario's data source.
 type DataConfig struct {

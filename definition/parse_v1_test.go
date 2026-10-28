@@ -22,7 +22,7 @@ var knownDropped = map[string]bool{
 // which the v1 path drops unread (v1 readers ignore it).
 func v2OnlyDropped(path string) bool {
 	p := pattern(path)
-	for _, prefix := range []string{"thresholds[]", "scenarios[].thresholds[]", "scenarios[].steps[].thresholds[]", "target.base_url",
+	for _, prefix := range []string{"thresholds[]", "scenarios[].thresholds[]", "scenarios[].steps[].thresholds[]", "scenarios[].run_once", "scenarios[].teardown", "target.base_url",
 		"expected_statuses[]", "scenarios[].steps[].checks", "scenarios[].steps[].extract[].required",
 		"scenarios[].steps[].extract[].on_fail", "scenarios[].steps[].extract[].pick", "http", "tls", "scenarios[].steps[].follow_redirects",
 		"scenarios[].steps[].max_redirects", "load"} {

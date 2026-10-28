@@ -1,0 +1,34 @@
+{
+  "schema_version": "2.0",
+  "name": "Weighted teardown",
+  "virtual_users": 2,
+  "duration": "30s",
+  "scenarios": [
+    {
+      "name": "Home",
+      "steps": [
+        {
+          "name": "Get home",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Clean up",
+      "teardown": true,
+      "weight": 2,
+      "steps": [
+        {
+          "name": "Get home",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/"
+          }
+        }
+      ]
+    }
+  ]
+}

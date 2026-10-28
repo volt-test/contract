@@ -531,6 +531,47 @@
       "description": "An HTTP request. The URL, body and header values may contain ${variable} references."
     },
     "Scenario": {
+      "dependentSchemas": {
+        "run_once": {
+          "anyOf": [
+            {
+              "properties": {
+                "run_once": {
+                  "const": false
+                }
+              }
+            },
+            {
+              "properties": {
+                "teardown": {
+                  "const": false
+                },
+                "weight": {
+                  "maximum": 0
+                }
+              }
+            }
+          ]
+        },
+        "teardown": {
+          "anyOf": [
+            {
+              "properties": {
+                "teardown": {
+                  "const": false
+                }
+              }
+            },
+            {
+              "properties": {
+                "weight": {
+                  "maximum": 0
+                }
+              }
+            }
+          ]
+        }
+      },
       "properties": {
         "name": {
           "type": "string",
@@ -544,7 +585,7 @@
         "weight": {
           "type": "integer",
           "minimum": 0,
-          "description": "Relative chance that a virtual user runs this scenario."
+          "description": "Relative chance that a virtual user runs this scenario. Not allowed\non a run_once or teardown scenario."
         },
         "think_time": {
           "type": "string",
@@ -572,6 +613,14 @@
           },
           "type": "array",
           "description": "Pass/fail rules for this scenario, e.g. \"iteration_duration_p95 \u003c 5s\"."
+        },
+        "run_once": {
+          "type": "boolean",
+          "description": "Setup: run the scenario once, by one virtual user, before the load\nstarts. The variables it extracts are readable by every virtual user\nas ${variable}. Takes no weight and is never picked for the load."
+        },
+        "teardown": {
+          "type": "boolean",
+          "description": "Run the scenario once after every virtual user has stopped, with the\nsetup variables readable, e.g. to delete seeded data. Takes no weight\nand is never picked for the load."
         }
       },
       "additionalProperties": false,
@@ -880,9 +929,19 @@
       "items": {
         "$ref": "#/$defs/Scenario"
       },
+      "contains": {
+        "properties": {
+          "run_once": {
+            "const": false
+          },
+          "teardown": {
+            "const": false
+          }
+        }
+      },
       "type": "array",
       "minItems": 1,
-      "description": "Scenarios that virtual users run, picked at random by weight."
+      "description": "Scenarios that virtual users run, picked at random by weight. A\nrun_once or teardown scenario is never picked; it runs once."
     },
     "region_config": {
       "items": {

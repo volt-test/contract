@@ -17,8 +17,9 @@
 // way the v1 readers read it: unknown keys are ignored, keys match
 // case-insensitively, and v2-only keys (contract:"v2", such as
 // target.base_url, thresholds, expected_statuses, http, tls, load, a
-// step's checks, follow_redirects and max_redirects, and an extractor's
-// required, on_fail and pick) are dropped unread. Values are checked for their
+// scenario's run_once and teardown, a step's checks, follow_redirects and
+// max_redirects, and an extractor's required, on_fail and pick) are
+// dropped unread. Values are checked for their
 // JSON type only, with two classes of field:
 //
 //   - Core fields are decoded by every v1 reader (the headless CLI, the
@@ -237,4 +238,27 @@
 // iterations per time_unit; "" means 1s. preallocated_vus is required, and
 // max_vus 0 means preallocated_vus. Parse leaves both defaults to the
 // reader. load joined schema_version "2.0" while it is a preview.
+//
+// # Setup and teardown (v2)
+//
+// A Scenario with RunOnce is a setup scenario and one with Teardown a
+// teardown scenario; IsLoad reports the others. Neither kind is picked for
+// the load. Setup scenarios run before the load, one at a time in
+// definition order, each by one virtual user; the variables they extract
+// become read-only globals that every load virtual user and every teardown
+// scenario reads as ${name}, and a later setup scenario sees the globals of
+// the earlier ones. A CSV column wins over a global (in the virtual user
+// that reads the row only), and a global wins over a built-in variable. A
+// failed setup step fails the run before the load starts; a stop during
+// setup ends it as stopped. Teardown scenarios run once each, in definition
+// order, after the load ends (completed, stopped or aborted), but not
+// after a failed or stopped setup. The engine does not cancel them on a
+// stop, so only http_timeout bounds each request, but the headless CLI
+// waits at most 10 seconds after a signal before it exits and reports
+// a completed load as stopped. Parse rejects both flags on one
+// scenario, a weight above 0 on either, a definition with no load scenario,
+// and any other scenario extracting a variable a setup scenario extracts.
+// VoltTest Cloud does not run them yet. The README section "Setup and
+// teardown" gives the full rules. run_once and teardown joined
+// schema_version "2.0" while it is a preview.
 package definition
