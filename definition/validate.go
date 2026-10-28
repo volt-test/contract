@@ -16,6 +16,7 @@ var (
 	checkTypes   = []string{string(CheckStatus), string(CheckHeader), string(CheckBody), string(CheckJSON),
 		string(CheckHTML), string(CheckTiming), string(CheckURL), string(CheckCookie)}
 	failModes = []string{string(FailRecord), string(FailFail), string(FailAbort)}
+	picks     = []string{string(PickRandom), string(PickFirst), string(PickLast), string(PickAll)}
 	jsonKinds = []string{"array", "object", "string", "number", "bool", "null"}
 )
 
@@ -133,6 +134,13 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 						ps.oneOf(ep+".on_fail", string(ex.OnFail), failModes)
 					} else {
 						ps.add(ep+".on_fail", "only applies with required: true")
+					}
+				}
+				if ex.Pick != "" {
+					if ex.Type == "header" || ex.Type == "cookie" {
+						ps.add(ep+".pick", "only applies to json, regex and html extractors")
+					} else {
+						ps.oneOf(ep+".pick", string(ex.Pick), picks)
 					}
 				}
 			}

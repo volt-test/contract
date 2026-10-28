@@ -89,6 +89,7 @@ var v1ReadSet = map[string]string{
 	"scenarios[].steps[].checks":             "v2",
 	"scenarios[].steps[].extract[].required": "v2",
 	"scenarios[].steps[].extract[].on_fail":  "v2",
+	"scenarios[].steps[].extract[].pick":     "v2",
 	"expected_statuses":                      "v2",
 	"http":                                   "v2",
 	"tls":                                    "v2",
@@ -648,7 +649,8 @@ func TestV1DropsCheckKeys(t *testing.T) {
 	}
 	stripped := withoutV2OnlyKeys(t, raw)
 	if bytes.Equal(stripped, raw) || bytes.Contains(stripped, []byte(`"checks"`)) ||
-		bytes.Contains(stripped, []byte(`"required"`)) || bytes.Contains(stripped, []byte(`"expected_statuses"`)) {
+		bytes.Contains(stripped, []byte(`"required"`)) || bytes.Contains(stripped, []byte(`"expected_statuses"`)) ||
+		bytes.Contains(stripped, []byte(`"pick"`)) {
 		t.Fatalf("the fixture's v2 keys were not all removed: %s", stripped)
 	}
 	want, err := Parse(stripped)
@@ -667,8 +669,8 @@ func TestV1DropsCheckKeys(t *testing.T) {
 				t.Errorf("step %s kept checks", st.Name)
 			}
 			for _, ex := range st.Extract {
-				if ex.Required || ex.OnFail != "" {
-					t.Errorf("extractor %s kept required/on_fail", ex.VariableName)
+				if ex.Required || ex.OnFail != "" || ex.Pick != "" {
+					t.Errorf("extractor %s kept required/on_fail/pick", ex.VariableName)
 				}
 			}
 		}

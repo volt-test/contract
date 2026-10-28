@@ -48,6 +48,8 @@ var checkFixtureProblems = map[string]string{
 	"structure_extract_on_fail_without_required.json": `scenarios[0].steps[0].extract[0].on_fail: only applies with required: true`,
 	"structure_extract_on_fail_required_false.json":   `scenarios[0].steps[0].extract[0].on_fail: only applies with required: true`,
 	"structure_extract_bad_on_fail.json":              `scenarios[0].steps[0].extract[0].on_fail: must be one of "record", "fail", "abort", got "skip"`,
+	"structure_extract_bad_pick.json":                 `scenarios[0].steps[0].extract[0].pick: must be one of "random", "first", "last", "all", got "any"`,
+	"structure_extract_pick_on_header.json":           `scenarios[0].steps[0].extract[1].pick: only applies to json, regex and html extractors`,
 	"structure_expected_statuses_600.json":            `expected_statuses[1]: must be an HTTP status code from 100 to 599, got 600`,
 	"type_check_equals_object.json":                   check0 + `.equals: must be a string, a number or true/false`,
 	"type_check_equals_null.json":                     check0 + `.equals: must not be null`,
@@ -69,7 +71,7 @@ func TestCheckFixtures(t *testing.T) {
 		name := filepath.Base(f)
 		want, ok := checkFixtureProblems[name]
 		if !ok {
-			related := strings.Contains(name, "_check") || strings.Contains(name, "on_fail") ||
+			related := strings.Contains(name, "_check") || strings.Contains(name, "on_fail") || strings.Contains(name, "pick") ||
 				strings.Contains(name, "expected_statuses") || strings.Contains(name, "required")
 			if related && !strings.HasPrefix(name, "unknown_") {
 				t.Errorf("%s: no expected problem in checkFixtureProblems", name)

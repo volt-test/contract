@@ -30,9 +30,9 @@ v2 and later definitions carry `schema_version` as a `"MAJOR.MINOR"` string.
 - v2 is `"2.0"`. It is a preview until SDK 2.0.0 ships: fields may still
   join `"2.0"` until then. After that, each new definition field bumps the
   minor. [Checks](#checks), `expected_statuses`, the extractor keys
-  `required` and `on_fail`, and the [HTTP and TLS
-  options](#http-and-tls-options) (`http`, `tls` and a step's
-  `follow_redirects` and `max_redirects`) and the [arrival-rate
+  `required`, `on_fail` and [`pick`](#extracting-from-arrays), and the
+  [HTTP and TLS options](#http-and-tls-options) (`http`, `tls` and a
+  step's `follow_redirects` and `max_redirects`) and the [arrival-rate
   load](#arrival-rate-load) (`load`) joined `"2.0"` under this rule.
 - A reader rejects an unknown major, or a minor newer than it supports.
 
@@ -55,7 +55,9 @@ does not mean module v2.
     `duration` each virtual user runs its scenario once; a `duration` that
     is present must be greater than zero, and so must every stage's
     `duration`;
-  - known extractor types, data formats and data modes;
+  - known extractor types, data formats and data modes, and an
+    extractor's `pick` from its list, on `json`, `regex` and `html`
+    extractors only (see [Extracting from arrays](#extracting-from-arrays));
   - thresholds: every expression parses, each metric is allowed at its
     scope, and `delay_abort` is a non-negative duration set only with
     `abort_on_fail: true` (see [Thresholds](#thresholds));
@@ -73,8 +75,8 @@ does not mean module v2.
   backend) read it. Unknown keys are ignored, keys match case-insensitively,
   and v2-only keys (`target.base_url`, `thresholds` at every level,
   `expected_statuses`, `http`, `tls`, `load`, a step's `checks`,
-  `follow_redirects` and `max_redirects`, and an extractor's `required`
-  and `on_fail`) are dropped unread, whatever their value. Values are
+  `follow_redirects` and `max_redirects`, and an extractor's `required`,
+  `on_fail` and `pick`) are dropped unread, whatever their value. Values are
   checked for their JSON type only:
   - **core** fields, which every v1 reader decodes: a value of the wrong
     type fails `Parse`, as it fails every reader;
@@ -316,7 +318,7 @@ optional `name` and `on_fail`.
 ### Zero values
 
 A key with its zero value counts as absent: `""` for `name`, `selector`,
-`on_fail`, `not_contains`, `matches`, `is`, `count`, `size` and
+`on_fail`, an extractor's `pick`, `not_contains`, `matches`, `is`, `count`, `size` and
 `duration`, and `[]` for `in`, `not_in`, `between` and
 `expected_statuses`. Marshalling a parsed definition leaves them out. Two
 exceptions:
@@ -342,8 +344,8 @@ them.
 
 ### Required extractors
 
-An extractor with `"required": true` turns a miss (nothing found) into a
-failed check labelled `extract <variable_name>`, with `on_fail` defaulting
+An extractor with `"required": true` turns a miss (nothing found, or a
+JSON `null`) into a failed check labelled `extract <variable_name>`, with `on_fail` defaulting
 to `abort`. `on_fail` is rejected on an extractor without
 `"required": true`. Required or not, an extractor always assigns its
 variable; a miss assigns `""`.
@@ -355,6 +357,69 @@ required extractors are not counted, like checks. When a check or a
 required extractor with `on_fail: "abort"` fails, the step's other checks
 and extractors are still evaluated, and every extractor assigns its
 variable, before the iteration ends.
+
+### Extracting from arrays
+
+`pick` tells a `json`, `regex` or `html` extractor which value to take
+when its selector finds several, or finds an array: `random`, `first`,
+`last` or `all`. It is rejected on `header` and `cookie` extractors. A
+JSON path can match every element of an array with `[*]`, as in
+`$.items[*].id`.
+
+```json
+"extract": [
+  {"variable_name": "ids", "selector": "$.items[*].id", "type": "json", "pick": "all"},
+  {"variable_name": "item_id", "selector": "$.items[*].id", "type": "json", "pick": "random"},
+  {"variable_name": "answer", "selector": "$.answers", "type": "json", "pick": "last"}
+]
+```
+
+- `random` draws one candidate with the virtual user's own random
+  generator, so virtual users draw independently of each other.
+- `all` takes every candidate as a JSON array, such as `[3,7,9]`.
+- `pick: all` keeps the whole list in each virtual user's variables until
+  the variable is next assigned; a large list at a high virtual-user count
+  costs memory.
+
+**Hits and misses on `json`.** A JSON `null` is a miss and assigns `""`.
+A JSON `""` is a hit. **Candidates** are the values `pick` chooses from:
+`null` elements are never candidates, and they are dropped before
+`first`, `last`, `random` and `all`, so `all` holds exactly the values
+`random` draws from.
+
+| The path finds | `all` | `first`, `last`, `random` | no `pick` |
+|---|---|---|---|
+| nothing, or `null` (path without `[*]`) | miss | miss | miss |
+| an array (path without `[*]`) | the candidates as an array, a hit even when there are none (`[]`) | one candidate; no candidates is a miss | the array as it is, as compact JSON |
+| a scalar or an object (path without `[*]`) | `[v]` | the value | the value |
+| at least one candidate (path with `[*]`) | every candidate, in document order | one candidate | the first candidate |
+| no candidates (path with `[*]`), including matches that are all `null` | `[]` (a hit) when the container before the first `[*]` is an array; otherwise a miss | miss | miss |
+
+So `{"answers": []}` with `$.answers` gives `[]` for `all` and for no
+`pick`, and a miss for `first`. `{"items": []}` with `$.items[*].id` and
+`all` gives `[]`, while `{}` and `{"items": null}` are a miss.
+
+**`regex` and `html`.** For `regex`, the candidates are group 1 of every
+match; an empty group 1 is a hit, as in v1, and a pattern without a group
+never hits. Without `pick`, `regex` reads the first match. For `html`, the
+candidates are the trimmed text, or the `attribute`, of every element the
+CSS selector matches; an empty value is never a candidate. Without `pick`,
+`html` reads the first matching element, as in v1, and an empty value
+there is a miss. When nothing matches, `regex` and `html` miss for every
+`pick`, `all` included: unlike a JSON array, a regex or CSS match has no
+container that tells an empty list from an absent one.
+
+**`required`** fails exactly on a miss under these rules. With `all`, that
+is a path that is missing or `null`, a container before the first `[*]`
+that is missing or isn't an array, or a regex or CSS selector that matches
+nothing.
+
+**Values.** A v2 extractor keeps the JSON type of what it found and
+renders it into `${variable}` as follows: a string as it is, a number
+exactly as written (`1000000` stays `1000000`, and a 19-digit id keeps
+every digit), `true` or `false`, and an array or object as compact JSON
+with sorted keys and no HTML escaping (`<` and `&` stay as they are). An
+empty array renders as `[]`.
 
 ### expected_statuses
 

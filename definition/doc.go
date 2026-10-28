@@ -18,7 +18,7 @@
 // case-insensitively, and v2-only keys (contract:"v2", such as
 // target.base_url, thresholds, expected_statuses, http, tls, load, a
 // step's checks, follow_redirects and max_redirects, and an extractor's
-// required and on_fail) are dropped unread. Values are checked for their
+// required, on_fail and pick) are dropped unread. Values are checked for their
 // JSON type only, with two classes of field:
 //
 //   - Core fields are decoded by every v1 reader (the headless CLI, the
@@ -144,10 +144,10 @@
 // unlike a threshold's abort_on_fail). The default is FailFail for status
 // checks and FailRecord for the others.
 //
-// An Extract with Required set turns a miss into a failed check labelled
-// "extract <variable_name>", FailAbort by default; on_fail is rejected
-// without required: true. Every extractor assigns its variable; a miss
-// assigns "". A required extractor counts as one check on every response
+// An Extract with Required set turns a miss (nothing found, or a JSON
+// null) into a failed check labelled "extract <variable_name>", FailAbort
+// by default; on_fail is rejected without required: true. Every extractor
+// assigns its variable; a miss assigns "". A required extractor counts as one check on every response
 // its step evaluates (a hit passes, a miss fails); an optional one is
 // never counted. When an abort check or required extractor fails, the
 // step's other checks and extractors are still evaluated, and every
@@ -170,8 +170,12 @@
 // scenario name, step name and label together, each unique at its level;
 // results also carry its type, which is not part of the key.
 //
-// Checks, expected_statuses and the extractor keys required and on_fail
-// joined schema_version "2.0" while it is a preview.
+// Extract.Pick (PickRandom, PickFirst, PickLast, PickAll) chooses among
+// several values for json, regex and html extractors; the README section
+// "Extracting from arrays" gives the rules.
+//
+// Checks, expected_statuses and the extractor keys required, on_fail and
+// pick joined schema_version "2.0" while it is a preview.
 //
 // # HTTP and TLS options (v2)
 //

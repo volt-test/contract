@@ -637,6 +637,70 @@ func TestRequiredExtract(t *testing.T) {
 	}
 }
 
+func TestExtractPick(t *testing.T) {
+	ex := func(typ string, fields map[string]any) []byte {
+		return v2doc(t, func(m map[string]any) {
+			e := map[string]any{"variable_name": "v", "selector": "x", "type": typ}
+			for k, v := range fields {
+				e[k] = v
+			}
+			step0(m)["extract"] = []any{e}
+		})
+	}
+	p := "scenarios[0].steps[0].extract[0]"
+	notApplicable := []string{p + ".pick: only applies to json, regex and html extractors"}
+	type pickCase struct {
+		name   string
+		typ    string
+		fields map[string]any
+		want   []string
+	}
+	var cases []pickCase
+	for _, typ := range []string{"json", "regex", "html"} {
+		for _, pick := range []string{"random", "first", "last", "all"} {
+			cases = append(cases, pickCase{typ + " " + pick, typ, map[string]any{"pick": pick}, nil})
+		}
+		cases = append(cases, pickCase{typ + " empty pick", typ, map[string]any{"pick": ""}, nil})
+	}
+	cases = append(cases,
+		pickCase{"required json all", "json", map[string]any{"pick": "all", "required": true, "on_fail": "record"}, nil},
+		pickCase{"header empty pick", "header", map[string]any{"pick": ""}, nil},
+		pickCase{"cookie empty pick", "cookie", map[string]any{"pick": ""}, nil},
+		pickCase{"header pick", "header", map[string]any{"pick": "first"}, notApplicable},
+		pickCase{"cookie pick", "cookie", map[string]any{"pick": "all"}, notApplicable},
+		pickCase{"header bad pick", "header", map[string]any{"pick": "any"}, notApplicable},
+		pickCase{"bad pick", "json", map[string]any{"pick": "any"},
+			[]string{p + `.pick: must be one of "random", "first", "last", "all", got "any"`}},
+		pickCase{"pick case", "regex", map[string]any{"pick": "First"},
+			[]string{p + `.pick: must be one of "random", "first", "last", "all", got "First"`}},
+		pickCase{"pick as number", "json", map[string]any{"pick": 1}, []string{p + ".pick: must be a string"}},
+	)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := problemStrings(t, ex(tc.typ, tc.fields)); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("problems:\n got %q\nwant %q", got, tc.want)
+			}
+		})
+	}
+	for _, pick := range []definition.Pick{definition.PickRandom, definition.PickFirst, definition.PickLast, definition.PickAll} {
+		d := mustParse(t, ex("html", map[string]any{"pick": string(pick), "attribute": "href"}))
+		if e := d.Scenarios[0].Steps[0].Extract[0]; e.Pick != pick {
+			t.Errorf("pick %q: extract = %+v", pick, e)
+		}
+		out, err := json.Marshal(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(out, []byte(`"pick":"`+string(pick)+`"`)) {
+			t.Errorf("Marshal lost pick %q: %s", pick, out)
+		}
+	}
+	d := mustParse(t, ex("header", map[string]any{"pick": ""}))
+	if out, _ := json.Marshal(d); bytes.Contains(out, []byte(`"pick"`)) {
+		t.Errorf("Marshal kept an empty pick: %s", out)
+	}
+}
+
 func TestExpectedStatuses(t *testing.T) {
 	doc := func(v any) []byte {
 		return v2doc(t, func(m map[string]any) { m["expected_statuses"] = v })
@@ -678,9 +742,9 @@ func TestV1IgnoresChecks(t *testing.T) {
 		`"extract":[{"variable_name":"t","selector":"$.t","type":"json"%s}]%s}]}]%s}`
 	without := []byte(strings.ReplaceAll(plain, "%s", ""))
 	for _, extra := range [][3]string{
-		{`,"required":true,"on_fail":"abort"`, `,"checks":[{"type":"status","in":[200]}]`, `,"expected_statuses":[200]`},
-		{`,"required":"yes","on_fail":5`, `,"checks":"status 200"`, `,"expected_statuses":"2xx"`},
-		{`,"Required":1,"ON_FAIL":[]`, `,"Checks":{"type":1},"checks":[{"equals":{"a":1},"in":[9999]}]`, `,"Expected_Statuses":[true]`},
+		{`,"required":true,"on_fail":"abort","pick":"all"`, `,"checks":[{"type":"status","in":[200]}]`, `,"expected_statuses":[200]`},
+		{`,"required":"yes","on_fail":5,"pick":5`, `,"checks":"status 200"`, `,"expected_statuses":"2xx"`},
+		{`,"Required":1,"ON_FAIL":[],"Pick":{"a":1}`, `,"Checks":{"type":1},"checks":[{"equals":{"a":1},"in":[9999]}]`, `,"Expected_Statuses":[true]`},
 		{`,"required":true,"on_fail":"fail"`, `,"checks":[{"type":"json","selector":"$.a","equals":1e999,"contains":-1e400}]`, `,"expected_statuses":[200]`},
 	} {
 		with := []byte(strings.Replace(strings.Replace(strings.Replace(plain, "%s", extra[0], 1), "%s", extra[1], 1), "%s", extra[2], 1))

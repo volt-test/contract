@@ -200,10 +200,20 @@ func checkSchemaRules(t *testing.T, s *jsonschema.Schema) {
 	emptyOnFail.Set("on_fail", &jsonschema.Schema{MaxLength: &zero})
 	needRequired := jsonschema.NewProperties()
 	needRequired.Set("required", &jsonschema.Schema{Const: true})
+	// A non-empty pick needs type json, regex or html, as in Parse.
+	optionalEnum(prop(extract, "pick"), definition.PicksForTest)
+	emptyPick := jsonschema.NewProperties()
+	emptyPick.Set("pick", &jsonschema.Schema{MaxLength: &zero})
+	pickTypes := jsonschema.NewProperties()
+	pickTypes.Set("type", &jsonschema.Schema{Enum: []any{"json", "regex", "html"}})
 	extract.DependentSchemas = map[string]*jsonschema.Schema{
 		"on_fail": {AnyOf: []*jsonschema.Schema{
 			{Properties: emptyOnFail},
 			{Required: []string{"required"}, Properties: needRequired},
+		}},
+		"pick": {AnyOf: []*jsonschema.Schema{
+			{Properties: emptyPick},
+			{Properties: pickTypes},
 		}},
 	}
 	// http.version and tls.min_version read "" as absent. The other rules
@@ -552,6 +562,9 @@ func TestSchemaShape(t *testing.T) {
 	if got, want := optionalEnum("Extract", "on_fail"), sorted(definition.FailModesForTest); !reflect.DeepEqual(got, want) {
 		t.Errorf("schema extract on_fail %q != Parse %q", got, want)
 	}
+	if got, want := optionalEnum("Extract", "pick"), sorted(definition.PicksForTest); !reflect.DeepEqual(got, want) {
+		t.Errorf("schema extract pick %q != Parse %q", got, want)
+	}
 	if got, want := optionalEnum("HTTPOptions", "version"), sorted(definition.HTTPVersionsForTest); !reflect.DeepEqual(got, want) {
 		t.Errorf("schema http version %q != Parse %q", got, want)
 	}
@@ -745,8 +758,8 @@ func checkShape(t *testing.T, props, defs map[string]any) {
 	if p := obj(ep["required"]); p["type"] != "boolean" {
 		t.Errorf("extract required = %v", p)
 	}
-	if contains(extract["required"], "required") || contains(extract["required"], "on_fail") {
-		t.Errorf("extract required keys = %v; required and on_fail are optional", extract["required"])
+	if contains(extract["required"], "required") || contains(extract["required"], "on_fail") || contains(extract["required"], "pick") {
+		t.Errorf("extract required keys = %v; required, on_fail and pick are optional", extract["required"])
 	}
 	wantDep := map[string]any{"anyOf": []any{
 		map[string]any{"properties": map[string]any{"on_fail": map[string]any{"maxLength": 0.0}}},
@@ -754,6 +767,13 @@ func checkShape(t *testing.T, props, defs map[string]any) {
 	}}
 	if got := obj(obj(extract["dependentSchemas"])["on_fail"]); !reflect.DeepEqual(got, wantDep) {
 		t.Errorf("extract dependentSchemas.on_fail = %v, want %v", got, wantDep)
+	}
+	wantPickDep := map[string]any{"anyOf": []any{
+		map[string]any{"properties": map[string]any{"pick": map[string]any{"maxLength": 0.0}}},
+		map[string]any{"properties": map[string]any{"type": map[string]any{"enum": []any{"json", "regex", "html"}}}},
+	}}
+	if got := obj(obj(extract["dependentSchemas"])["pick"]); !reflect.DeepEqual(got, wantPickDep) {
+		t.Errorf("extract dependentSchemas.pick = %v, want %v", got, wantPickDep)
 	}
 	steps := obj(obj(defs["Step"])["properties"])
 	if items := obj(obj(steps["checks"])["items"]); items["$ref"] != "#/$defs/Check" {

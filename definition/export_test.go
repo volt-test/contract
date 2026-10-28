@@ -7,6 +7,7 @@ var (
 	DataModesForTest        = dataModes
 	CheckTypesForTest       = checkTypes
 	FailModesForTest        = failModes
+	PicksForTest            = picks
 	JSONKindsForTest        = jsonKinds
 	HTTPVersionsForTest     = httpVersions
 	TLSVersionsForTest      = tlsVersions
