@@ -705,12 +705,17 @@ run its load scenario once.)
 - **Teardown.** Teardown scenarios run once each, in definition order,
   after every load virtual user has stopped, whether the load completed,
   was stopped or was aborted by a threshold, with the globals readable.
-  They do not run after a failed or stopped setup. A teardown is not
-  cancelled by a stop: its `think_time` runs in full and only
-  `http_timeout` bounds each request. A stop during the teardown keeps
-  the load's status, and a failing teardown never changes the status;
-  its checks count like any other (use `on_fail: "record"` to make them
-  advisory).
+  They do not run after a failed or stopped setup. A failing teardown
+  never changes the status; its checks count like any other (use
+  `on_fail: "record"` to make them advisory).
+- **Stopping during teardown.** The engine does not cancel a teardown on
+  a stop: its `think_time` runs in full, only `http_timeout` bounds each
+  request, and the engine keeps the load's status. The headless CLI
+  still reports a run that received a signal as `stopped` (exit 130)
+  unless the run had already failed or aborted. It waits at most 10
+  seconds after the signal for the teardown to finish before it exits,
+  and a second signal exits at once. A teardown cut short this way can
+  leave seeded data behind.
 - **Timing and results.** `duration`, `stages` and `load` time the load
   only, from the end of setup. Setup and teardown requests count in the
   test totals (including `rps`) and are also reported under their own

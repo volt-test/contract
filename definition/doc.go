@@ -252,8 +252,10 @@
 // failed setup step fails the run before the load starts; a stop during
 // setup ends it as stopped. Teardown scenarios run once each, in definition
 // order, after the load ends (completed, stopped or aborted), but not
-// after a failed or stopped setup; a stop does not cancel them, so only
-// http_timeout bounds each request. Parse rejects both flags on one
+// after a failed or stopped setup. The engine does not cancel them on a
+// stop, so only http_timeout bounds each request, but the headless CLI
+// waits at most 10 seconds after a signal before it exits and reports
+// a completed load as stopped. Parse rejects both flags on one
 // scenario, a weight above 0 on either, a definition with no load scenario,
 // and any other scenario extracting a variable a setup scenario extracts.
 // VoltTest Cloud does not run them yet. The README section "Setup and
