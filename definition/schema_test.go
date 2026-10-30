@@ -14,7 +14,6 @@ import (
 
 	"github.com/invopop/jsonschema"
 	validator "github.com/santhosh-tekuri/jsonschema/v6"
-	orderedmap "github.com/wk8/go-ordered-map/v2"
 
 	"github.com/volt-test/contract/definition"
 )
@@ -329,25 +328,31 @@ func bodyRules(t *testing.T, s *jsonschema.Schema) {
 	}
 	bodyType.AnyOf = []*jsonschema.Schema{{Enum: enum}, {MaxLength: &zero}}
 
-	props := func(k string, v *jsonschema.Schema) *orderedmap.OrderedMap[string, *jsonschema.Schema] {
+	// prop returns a schema whose property k has the schema v, requiring
+	// k when required is set.
+	prop := func(k string, v *jsonschema.Schema, required bool) *jsonschema.Schema {
 		p := jsonschema.NewProperties()
 		p.Set(k, v)
-		return p
+		s := &jsonschema.Schema{Properties: p}
+		if required {
+			s.Required = []string{k}
+		}
+		return s
 	}
 	is := func(v definition.BodyType) *jsonschema.Schema { return &jsonschema.Schema{Const: string(v)} }
 	request.DependentSchemas = map[string]*jsonschema.Schema{
 		"body": {AnyOf: []*jsonschema.Schema{
-			{Properties: props("body", &jsonschema.Schema{MaxLength: &zero})},
-			{Properties: props("body_type", &jsonschema.Schema{Enum: []any{"", string(definition.BodyTypeRaw)}})},
+			prop("body", &jsonschema.Schema{MaxLength: &zero}, false),
+			prop("body_type", &jsonschema.Schema{Enum: []any{"", string(definition.BodyTypeRaw)}}, false),
 		}},
 		"body_type": {AnyOf: []*jsonschema.Schema{
-			{Properties: props("body_type", &jsonschema.Schema{Not: is(definition.BodyTypeJSON)})},
+			prop("body_type", &jsonschema.Schema{Not: is(definition.BodyTypeJSON)}, false),
 			{Required: []string{"body_json"}},
 		}},
-		"body_json": {Required: []string{"body_type"}, Properties: props("body_type", is(definition.BodyTypeJSON))},
+		"body_json": prop("body_type", is(definition.BodyTypeJSON), true),
 		"fields": {AnyOf: []*jsonschema.Schema{
-			{Properties: props("fields", &jsonschema.Schema{MaxProperties: &zero})},
-			{Required: []string{"body_type"}, Properties: props("body_type", is(definition.BodyTypeForm))},
+			prop("fields", &jsonschema.Schema{MaxProperties: &zero}, false),
+			prop("body_type", is(definition.BodyTypeForm), true),
 		}},
 	}
 }

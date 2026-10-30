@@ -13,10 +13,10 @@ import (
 // number literals such as 19.90 and string escapes are kept, and <, > and
 // & are not escaped. The zero JSONBody (nil or empty) means absent.
 //
-// encoding/json escapes <, > and & in the output of every MarshalJSON, so
-// json.Marshal of a Definition writes them as <, > and &;
-// the JSON value is the same. Use a json.Encoder with SetEscapeHTML(false)
-// to keep them as written.
+// MarshalJSON writes the stored text, but encoding/json escapes <, > and
+// & in every MarshalJSON output, so json.Marshal of a Request or a
+// Definition writes them as \u003c, \u003e and \u0026, as it does in
+// body and headers. The JSON value is the same.
 type JSONBody []byte
 
 var errJSONBody = errors.New("definition: must be an object or an array")
