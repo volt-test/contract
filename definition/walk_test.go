@@ -13,6 +13,9 @@ import (
 // v2 accepts (or through every field when withV1 is set).
 func reachable(t reflect.Type, withV1 bool, out map[reflect.Type]bool) {
 	for t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice || t.Kind() == reflect.Array || t.Kind() == reflect.Map {
+		if reflect.PointerTo(t).Implements(unmarshalerType) {
+			return // a list or map that decodes itself, such as Fields
+		}
 		t = t.Elem()
 	}
 	if reflect.PointerTo(t).Implements(objectFormerType) {
@@ -43,6 +46,12 @@ func sample(t reflect.Type) any {
 	}
 	if t == reflect.TypeOf(Scalar{}) {
 		return "s"
+	}
+	if t == reflect.TypeOf(JSONBody(nil)) {
+		return map[string]any{"k": []any{1, "s"}}
+	}
+	if t == fieldsType {
+		return map[string]any{"k": "s"}
 	}
 	if reflect.PointerTo(t).Implements(objectFormerType) {
 		return sample(reflect.TypeOf(reflect.New(t).Interface().(objectFormer).objectForm()))

@@ -37,7 +37,12 @@ the v1 engines read and loses nothing on a round trip.
   keys with the wrong JSON type or case. `once_per_vu_ignored.json` does
   the same for a step's `once_per_vu`, set on every step of a scenario
   (which v2 rejects); `TestV1DropsOncePerVUKey` checks it, and the key
-  with the wrong JSON type or case.
+  with the wrong JSON type or case. `typed_body_ignored.json` does the same for a
+  request's `body_type`, `body_json` and `fields`, with combinations v2
+  rejects (`body` next to `body_type: "json"`, an unknown `body_type`,
+  `body_json` and `fields` without their `body_type`);
+  `TestV1DropsTypedBodyKeys` checks it, and the keys with the wrong JSON
+  type, a repeated field name, and other cases.
 
 Every `*_ignored.json` fixture keeps the right JSON type for each value:
 `TestV1RewriteMatchesDirectDecode` decodes every v1 fixture with plain
@@ -99,6 +104,17 @@ one, contains "secret".
   step, a fixed step value and a range from a bare `0`. The other accepted
   and rejected forms are in `TestParseThinkTime` in
   `definition/think_time_test.go`.
+  `body_json.json` has `body_type: "json"` bodies: an object with typed
+  and mixed placeholders, `19.90`, a 20-digit integer, `<`, `>` and `&`,
+  `null`, nested empty containers and keys out of alphabetical order; an
+  array body with a `Content-Type` override; an explicit `raw` body; and
+  `{}`. `body_form.json` has `body_type: "form"` fields out of
+  alphabetical order, with a value holding a space, `&` and `=`, names
+  that need encoding (`a b`, `ü`), an empty value, and a `Content-Type`
+  override in upper case next to `body: ""`. `body_form_empty.json` has
+  a form without `fields`, one with `fields: {}`, and a request with
+  every body key at its zero value. The other accepted cases are in
+  `TestBodyRules` in `definition/body_test.go`.
 - `invalid/`: definitions `Parse` rejects, run through the schema as well.
   - `unknown_*`: unknown or v1-only keys added to a valid definition. The
     expected paths are listed in `definition/parse_v2_test.go`.
@@ -162,6 +178,15 @@ one, contains "secret".
     fixture of the family. They cover a reversed range, spaces around the
     hyphen, a bound without a unit, a negative minimum and a missing
     maximum.
+  - Request bodies have the families `structure_body_*`, `type_body_*`,
+    `structure_fields_*` and `type_fields_*`: `bodyFixtureProblems` in
+    `definition/body_test.go` lists the problem each must produce, and the
+    test fails on an unlisted fixture of these families. They cover an
+    unknown `body_type`, `json` without `body_json`, `body_json` without
+    `json`, `body` next to `json` and next to `form`, `fields` with
+    `raw`, a field name used twice (written once as an escape), and
+    values of the wrong JSON type (a string `body_json`, a number
+    `body_type`, an array `fields`, a number field value).
   The schema rejects all of them except the cases listed, with reasons, in
   `knownSchemaLooser` in `definition/schema_test.go`.
 

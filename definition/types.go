@@ -354,16 +354,37 @@ type Step struct {
 	OncePerVU bool `json:"once_per_vu,omitempty" contract:"v2"`
 }
 
-// Request is an HTTP request template. URL, Body and header values may
-// contain ${variable} references.
+// Request is an HTTP request template. URL, Body, header values, the
+// string leaves of BodyJSON and the values of Fields may contain
+// ${variable} references; object keys and field names are sent as
+// written.
 type Request struct {
 	// HTTP method, e.g. "GET".
 	Method string `json:"method" jsonschema:"required,minLength=1"`
 	// An absolute http(s) URL, a URL starting with ${variable}, or a path
 	// starting with "/" that is appended to target.base_url.
 	URL string `json:"url" jsonschema:"required,minLength=1"`
-	// Request body.
+	// Request body, sent as written after ${variable} substitution. Not
+	// allowed with body_type "json" or "form".
 	Body string `json:"body,omitempty"`
+	// How the body is built: "raw" (the default) sends body as written,
+	// "json" sends body_json and "form" sends fields URL-encoded. With
+	// "json" and "form" the Content-Type header is set for you unless
+	// headers sets it.
+	BodyType BodyType `json:"body_type,omitempty" contract:"v2"`
+	// The body for body_type "json": a JSON object or array, sent with its
+	// keys, key order and number literals as written. Each string value
+	// is substituted on its own. A string that is exactly one ${...}
+	// reference without a filter takes the type of its value: a number,
+	// true/false, an array or an object is sent unquoted, and so is an
+	// integer built-in such as ${random_int(1,3)}. Any other string value
+	// is sent as a string. Keys are sent as written, never substituted.
+	BodyJSON JSONBody `json:"body_json,omitempty" contract:"v2"`
+	// The fields for body_type "form", sent URL-encoded in the order
+	// written. Each value is substituted, then encoded; names are encoded
+	// as written, never substituted. Names must be unique. Absent or {}
+	// with body_type "form" sends an empty body.
+	Fields Fields `json:"fields,omitempty" contract:"v2"`
 	// Header holds request headers under the v1 key "header". v1 readers
 	// differ in how they treat header and headers together, so Parse
 	// exposes both as sent.
@@ -388,6 +409,25 @@ func (r Request) MarshalJSON() ([]byte, error) {
 		out.Headers = &r.Headers
 	}
 	return json.Marshal(out)
+}
+
+// BodyType is how a request body is built.
+type BodyType string
+
+// The body types. The zero BodyType means BodyTypeRaw.
+const (
+	BodyTypeRaw  BodyType = "raw"
+	BodyTypeJSON BodyType = "json"
+	BodyTypeForm BodyType = "form"
+)
+
+// BodyKind returns the request's body type: BodyTypeRaw when body_type
+// is absent or "".
+func (r Request) BodyKind() BodyType {
+	if r.BodyType == "" {
+		return BodyTypeRaw
+	}
+	return r.BodyType
 }
 
 // Extract captures a value from a response.

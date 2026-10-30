@@ -18,6 +18,7 @@ var (
 	failModes = []string{string(FailRecord), string(FailFail), string(FailAbort)}
 	picks     = []string{string(PickRandom), string(PickFirst), string(PickLast), string(PickAll)}
 	jsonKinds = []string{"array", "object", "string", "number", "bool", "null"}
+	bodyTypes = []string{string(BodyTypeRaw), string(BodyTypeJSON), string(BodyTypeForm)}
 )
 
 // validateV2 checks the structure of a decoded v2 definition. objectForms
@@ -122,6 +123,7 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 			if msg := stepURLProblem(st.Request.URL, baseURL); msg != "" {
 				ps.add(sp+".request.url", msg)
 			}
+			validateRequestBody(&ps, sp+".request", st.Request)
 			for k, ex := range st.Extract {
 				ep := sp + ".extract[" + strconv.Itoa(k) + "]"
 				if strings.TrimSpace(ex.VariableName) == "" {
@@ -166,6 +168,45 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 	}
 	collectBounds(d, &ps, false, false, func(path string, _ ThresholdConfig) bool { return objectForms[path] })
 	return ps.err()
+}
+
+// validateRequestBody applies the body_type rules to the request at rp:
+// body goes with body_type raw, body_json with json (which requires it)
+// and fields with form. Zero values ("", {}) read as absent. With an
+// unknown body_type only body_type is reported.
+func validateRequestBody(ps *problems, rp string, r Request) {
+	if r.BodyType != "" {
+		ps.oneOf(rp+".body_type", string(r.BodyType), bodyTypes)
+	}
+	kind := r.BodyKind()
+	switch kind {
+	case BodyTypeRaw, BodyTypeJSON, BodyTypeForm:
+	default:
+		return
+	}
+	if r.Body != "" && kind != BodyTypeRaw {
+		ps.add(rp+".body", fmt.Sprintf("cannot be combined with body_type %q; use %s", kind, bodyKey(kind)))
+	}
+	switch {
+	case len(r.BodyJSON) > 0 && kind != BodyTypeJSON:
+		ps.add(rp+".body_json", `only applies with body_type "json"`)
+	case len(r.BodyJSON) == 0 && kind == BodyTypeJSON:
+		ps.add(rp+".body_json", `is required with body_type "json"`)
+	}
+	if len(r.Fields) > 0 && kind != BodyTypeForm {
+		ps.add(rp+".fields", `only applies with body_type "form"`)
+	}
+}
+
+// bodyKey is the key that holds the body for a body type.
+func bodyKey(kind BodyType) string {
+	switch kind {
+	case BodyTypeJSON:
+		return "body_json"
+	case BodyTypeForm:
+		return "fields"
+	}
+	return "body"
 }
 
 // validateSetupTeardown applies the run_once and teardown rules to one

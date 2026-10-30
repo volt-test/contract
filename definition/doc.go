@@ -18,8 +18,9 @@
 // case-insensitively, and v2-only keys (contract:"v2", such as
 // target.base_url, thresholds, expected_statuses, http, tls, load, a
 // scenario's run_once and teardown, a step's checks, follow_redirects,
-// max_redirects and once_per_vu, and an extractor's required, on_fail and
-// pick) are dropped unread. Values are checked for their
+// max_redirects and once_per_vu, a request's body_type, body_json and
+// fields, and an extractor's required, on_fail and pick) are dropped
+// unread. Values are checked for their
 // JSON type only, with two classes of field:
 //
 //   - Core fields are decoded by every v1 reader (the headless CLI, the
@@ -289,4 +290,24 @@
 // the step runs. ParseThinkTime reads a value as Parse validates it. v1
 // never validates think_time: Parse keeps a range or a negative value as
 // written. Ranges joined schema_version "2.0" while it is a preview.
+//
+// # Request bodies (v2)
+//
+// A Request's BodyType says how its body is built: BodyTypeRaw (the
+// default; "" means the same) sends Body, BodyTypeJSON sends BodyJSON and
+// BodyTypeForm sends Fields URL-encoded; BodyKind returns the effective
+// type. BodyJSON is a JSONBody, a JSON object or array held as compacted
+// JSON text with its key order and number literals as written. Fields
+// keeps the fields in the order written; on the wire it is a JSON object
+// of strings, and a name may appear only once. Each string leaf of
+// BodyJSON and each field value is substituted on its own; a leaf that is
+// exactly one reference without a filter takes the type of its value, so
+// a JSON number, true/false, array or object, or an integer built-in, is
+// sent unquoted. Keys and field names are sent as written. Parse rejects
+// an unknown body_type, a non-empty body with json or form, body_json
+// without json (which requires it), fields without form, a body_json that
+// is not an object or array, a field value that is not a string and a
+// field name used twice; {} fields read as absent. The README section
+// "Request bodies" gives the full rules. body_type, body_json and fields
+// joined schema_version "2.0" while it is a preview.
 package definition

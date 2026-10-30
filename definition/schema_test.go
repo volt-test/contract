@@ -50,6 +50,10 @@ func generateSchema(t *testing.T) []byte {
 				return &jsonschema.Schema{AnyOf: []*jsonschema.Schema{
 					{Type: "string"}, {Type: "number"}, {Type: "boolean"},
 				}}
+			case reflect.TypeOf(definition.JSONBody(nil)):
+				return &jsonschema.Schema{AnyOf: []*jsonschema.Schema{{Type: "object"}, {Type: "array"}}}
+			case reflect.TypeOf(definition.Fields(nil)):
+				return &jsonschema.Schema{Type: "object", AdditionalProperties: &jsonschema.Schema{Type: "string"}}
 			}
 			return nil
 		},
@@ -73,7 +77,7 @@ func generateSchema(t *testing.T) []byte {
 		"Scenario":     "A sequence of steps that a virtual user runs.",
 		"DataConfig":   "A CSV data source. Each virtual user takes rows according to mode.",
 		"Step":         "One HTTP request in a scenario.",
-		"Request":      "An HTTP request. The URL, body and header values may contain ${variable} references.",
+		"Request":      "An HTTP request. The URL, body, header values, the string values of body_json and the values of fields may contain ${variable} references; keys and field names are sent as written.",
 		"Extract":      "A value to capture from the response.",
 		"Check":        "An assertion on the response: a type, a selector where the type needs one, and exactly one operator.",
 		"Threshold":    "A pass/fail rule: an expression such as \"p95 < 500ms\", or an object with the expression and abort settings.",
@@ -103,6 +107,7 @@ func generateSchema(t *testing.T) []byte {
 	checkSchemaRules(t, s)
 	setupTeardownRules(t, s)
 	oncePerVURules(t, s)
+	bodyRules(t, s)
 
 	b, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
@@ -303,6 +308,55 @@ func oncePerVURules(t *testing.T, s *jsonschema.Schema) {
 	scenario.AnyOf = []*jsonschema.Schema{flag("run_once"), flag("teardown"), {Properties: steps}}
 }
 
+// bodyRules adds the body_type rules: body_type from its list ("" reads as
+// absent), body_json only with "json", which requires it, fields only with
+// "form" ({} reads as absent), and a non-empty body only with "raw" or no
+// body_type. Unique field names are Parse's alone; see knownSchemaLooser.
+func bodyRules(t *testing.T, s *jsonschema.Schema) {
+	t.Helper()
+	request := s.Definitions["Request"]
+	for _, k := range []string{"body", "body_type", "body_json", "fields"} {
+		if _, ok := request.Properties.Get(k); !ok {
+			t.Fatalf("schema has no property Request.%s", k)
+		}
+	}
+	zero := uint64(0)
+	bodyType, _ := request.Properties.Get("body_type")
+	enum := make([]any, len(definition.BodyTypesForTest))
+	for i, v := range definition.BodyTypesForTest {
+		enum[i] = v
+	}
+	bodyType.AnyOf = []*jsonschema.Schema{{Enum: enum}, {MaxLength: &zero}}
+
+	// prop returns a schema whose property k has the schema v, requiring
+	// k when required is set.
+	prop := func(k string, v *jsonschema.Schema, required bool) *jsonschema.Schema {
+		p := jsonschema.NewProperties()
+		p.Set(k, v)
+		s := &jsonschema.Schema{Properties: p}
+		if required {
+			s.Required = []string{k}
+		}
+		return s
+	}
+	is := func(v definition.BodyType) *jsonschema.Schema { return &jsonschema.Schema{Const: string(v)} }
+	request.DependentSchemas = map[string]*jsonschema.Schema{
+		"body": {AnyOf: []*jsonschema.Schema{
+			prop("body", &jsonschema.Schema{MaxLength: &zero}, false),
+			prop("body_type", &jsonschema.Schema{Enum: []any{"", string(definition.BodyTypeRaw)}}, false),
+		}},
+		"body_type": {AnyOf: []*jsonschema.Schema{
+			prop("body_type", &jsonschema.Schema{Not: is(definition.BodyTypeJSON)}, false),
+			{Required: []string{"body_json"}},
+		}},
+		"body_json": prop("body_type", is(definition.BodyTypeJSON), true),
+		"fields": {AnyOf: []*jsonschema.Schema{
+			prop("fields", &jsonschema.Schema{MaxProperties: &zero}, false),
+			prop("body_type", is(definition.BodyTypeForm), true),
+		}},
+	}
+}
+
 // thresholdSchema describes a threshold: the expression string, or the
 // object form reflected from the ThresholdConfig struct (with its field
 // comments).
@@ -446,6 +500,8 @@ var knownSchemaLooser = map[string]string{
 	"structure_think_time_missing_unit.json":    "durations are plain strings in the schema",
 	"structure_think_time_negative_min.json":    "durations are plain strings in the schema",
 	"structure_think_time_trailing_hyphen.json": "durations are plain strings in the schema",
+
+	"structure_fields_duplicate.json": "JSON Schema reads an object with a duplicate key as its last member; Parse rejects a form field name used twice",
 }
 
 // TestSchemaAgreesWithParse checks that the schema and Parse agree on
@@ -664,9 +720,60 @@ func TestSchemaShape(t *testing.T) {
 		t.Errorf("schema load types %q != Parse %q", got, want)
 	}
 
+	if got, want := optionalEnum("Request", "body_type"), sorted(definition.BodyTypesForTest); !reflect.DeepEqual(got, want) {
+		t.Errorf("schema request body_type %q != Parse %q", got, want)
+	}
+
 	checkShape(t, props, defs)
 	httpTLSShape(t, props, defs)
 	loadShape(t, s, defs)
+	bodyShape(t, defs)
+}
+
+// bodyShape pins the schema of the request body keys.
+func bodyShape(t *testing.T, defs map[string]any) {
+	t.Helper()
+	obj := func(v any) map[string]any { m, _ := v.(map[string]any); return m }
+	request := obj(defs["Request"])
+	rp := obj(request["properties"])
+	var keys []string
+	for k := range rp {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	if want := []string{"body", "body_json", "body_type", "fields", "headers", "method", "url"}; !reflect.DeepEqual(keys, want) {
+		t.Errorf("request keys = %q, want %q", keys, want)
+	}
+	if !reflect.DeepEqual(request["required"], []any{"method", "url"}) {
+		t.Errorf("request required = %v", request["required"])
+	}
+	wantJSON := []any{map[string]any{"type": "object"}, map[string]any{"type": "array"}}
+	if got := obj(rp["body_json"])["anyOf"]; !reflect.DeepEqual(got, wantJSON) {
+		t.Errorf("body_json anyOf = %v, want %v", got, wantJSON)
+	}
+	if _, ok := obj(rp["body_json"])["type"]; ok {
+		t.Error("body_json has a type next to its anyOf")
+	}
+	fields := obj(rp["fields"])
+	if fields["type"] != "object" || !reflect.DeepEqual(fields["additionalProperties"], map[string]any{"type": "string"}) {
+		t.Errorf("fields = %v, want an object of strings", fields)
+	}
+	for _, k := range []string{"body", "body_type", "body_json", "fields"} {
+		for _, rule := range []string{"pattern", "minLength", "minItems", "minProperties"} {
+			if _, ok := obj(rp[k])[rule]; ok {
+				t.Errorf("request %s has %s; a zero value must stay valid", k, rule)
+			}
+		}
+	}
+	deps := obj(request["dependentSchemas"])
+	var depKeys []string
+	for k := range deps {
+		depKeys = append(depKeys, k)
+	}
+	sort.Strings(depKeys)
+	if want := []string{"body", "body_json", "body_type", "fields"}; !reflect.DeepEqual(depKeys, want) {
+		t.Errorf("request dependentSchemas = %q, want %q", depKeys, want)
+	}
 }
 
 // loadShape pins the schema of the load object.

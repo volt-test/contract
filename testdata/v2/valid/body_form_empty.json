@@ -1,0 +1,40 @@
+{
+  "schema_version": "2.0",
+  "name": "Empty form bodies",
+  "virtual_users": 1,
+  "duration": "10s",
+  "scenarios": [
+    {
+      "name": "Logout",
+      "steps": [
+        {
+          "name": "No fields",
+          "request": {
+            "method": "POST",
+            "url": "https://shop.example.com/logout",
+            "body_type": "form"
+          }
+        },
+        {
+          "name": "Empty fields",
+          "request": {
+            "method": "POST",
+            "url": "https://shop.example.com/logout",
+            "body_type": "form",
+            "fields": {}
+          }
+        },
+        {
+          "name": "Zero values",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/",
+            "body_type": "",
+            "body": "",
+            "fields": {}
+          }
+        }
+      ]
+    }
+  ]
+}
