@@ -99,6 +99,9 @@ var v1ReadSet = map[string]string{
 	"scenarios[].steps[].max_redirects":      "v2",
 	"scenarios[].steps[].once_per_vu":        "v2",
 	"load":                                   "v2",
+	"scenarios[].steps[].request.body_type":  "v2",
+	"scenarios[].steps[].request.body_json":  "v2",
+	"scenarios[].steps[].request.fields":     "v2",
 }
 
 type classified struct {
@@ -428,10 +431,20 @@ type mirrorScenario struct {
 
 type mirrorStep struct {
 	Name      string            `json:"name"`
-	Request   Request           `json:"request"`
+	Request   mirrorRequest     `json:"request"`
 	Extract   []mirrorExtract   `json:"extract"`
 	Validate  []LegacyValidator `json:"validate"`
 	ThinkTime string            `json:"think_time"`
+}
+
+// mirrorRequest is Request without the v2-only body keys, which the v1
+// readers do not know.
+type mirrorRequest struct {
+	Method  string            `json:"method"`
+	URL     string            `json:"url"`
+	Body    string            `json:"body"`
+	Header  map[string]string `json:"header"`
+	Headers map[string]string `json:"headers"`
 }
 
 type mirrorExtract struct {
@@ -471,7 +484,9 @@ func toMirror(d *Definition) mirrorDefinition {
 			ms.Steps = make([]mirrorStep, len(sc.Steps))
 		}
 		for j, st := range sc.Steps {
-			ms.Steps[j] = mirrorStep{Name: st.Name, Request: st.Request,
+			r := st.Request
+			ms.Steps[j] = mirrorStep{Name: st.Name, Request: mirrorRequest{Method: r.Method, URL: r.URL,
+				Body: r.Body, Header: r.Header, Headers: r.Headers},
 				Validate: st.Validate, ThinkTime: st.ThinkTime}
 			if st.Extract != nil {
 				ms.Steps[j].Extract = make([]mirrorExtract, len(st.Extract))
@@ -878,6 +893,68 @@ func TestV1DropsOncePerVUKey(t *testing.T) {
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s: v1 with once_per_vu:\n got %+v\nwant %+v", name, got, want)
+		}
+	}
+}
+
+// TestV1DropsTypedBodyKeys checks that typed_body_ignored.json, a v1
+// definition carrying body_type, body_json and fields with combinations v2
+// rejects (body next to body_type json or form, an unknown body_type,
+// body_json and fields without their body_type), parses exactly as it does
+// without them, and so do mistyped values and other spellings of the keys.
+func TestV1DropsTypedBodyKeys(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "testdata", "v1", "cli", "typed_body_ignored.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stripped := withoutV2OnlyKeys(t, raw)
+	for _, k := range []string{`"body_type"`, `"body_json"`, `"fields"`} {
+		if !bytes.Contains(raw, []byte(k)) || bytes.Contains(stripped, []byte(k)) {
+			t.Fatalf("the fixture's %s keys were not removed: %s", k, stripped)
+		}
+	}
+	want, err := Parse(stripped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps := want.Scenarios[0].Steps
+	if len(steps) != 3 || steps[0].Request.Body != `{"email":"user@example.com"}` || steps[1].Request.Body != "q=shoes" ||
+		steps[0].Request.Header["Content-Type"] != "application/json" {
+		t.Fatalf("steps = %+v; the keys next to the body keys must still be read", steps)
+	}
+	docs := map[string][]byte{"fixture": raw}
+	for name, keys := range map[string]string{
+		"strings":             `"body_type":"json","body_json":"{\"a\":1}","fields":"a=1",`,
+		"numbers":             `"body_type":1,"body_json":2,"fields":3,`,
+		"null":                `"body_type":null,"body_json":null,"fields":null,`,
+		"wrong containers":    `"body_type":["json"],"body_json":true,"fields":[["a","1"]],`,
+		"mistyped fields":     `"body_type":"form","fields":{"a":1,"b":null,"c":{}},`,
+		"duplicate fields":    `"body_type":"form","fields":{"a":"1","a":"2"},`,
+		"case variants":       `"Body_Type":"json","BODY_JSON":{"a":1},"Fields":{"a":"1"},`,
+		"duplicate body_json": `"body_json":{"a":1},"body_json":7,`,
+	} {
+		docs[name] = bytes.Replace(stripped, []byte(`"method":"GET"`), []byte(keys+`"method":"GET"`), 1)
+	}
+	for name, doc := range docs {
+		if !bytes.Contains(bytes.ToLower(doc), []byte(`"body_type":`)) && !bytes.Contains(doc, []byte(`"body_json":`)) {
+			t.Fatalf("%s: no body key: %s", name, doc)
+		}
+		got, err := Parse(doc)
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", name, err, doc)
+		}
+		if !got.IsV1() || len(got.V1TypeProblems) != 0 {
+			t.Errorf("%s: IsV1 %v, V1TypeProblems %v", name, got.IsV1(), got.V1TypeProblems)
+		}
+		for _, sc := range got.Scenarios {
+			for _, st := range sc.Steps {
+				if r := st.Request; r.BodyType != "" || r.BodyJSON != nil || r.Fields != nil {
+					t.Errorf("%s: step %s kept body_type/body_json/fields", name, st.Name)
+				}
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: v1 with typed body keys:\n got %+v\nwant %+v", name, got, want)
 		}
 	}
 }

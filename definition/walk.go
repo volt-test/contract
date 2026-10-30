@@ -340,6 +340,18 @@ func (w *walker) walk(raw json.RawMessage, t reflect.Type, path string) {
 		return
 	}
 	t = derefType(t)
+	if t == fieldsType {
+		// Fields decodes itself, but its problems belong to its members:
+		// each value must be a string and each name used once.
+		if raw[0] != '{' {
+			w.problem(path, "must be an object")
+			return
+		}
+		if err := fieldsProblems(raw, path, w.problem); err != nil {
+			w.problem(path, "must be an object")
+		}
+		return
+	}
 	if form := objectFormOf(t); form != nil && raw[0] == '{' {
 		if w.objectForms == nil {
 			w.objectForms = map[string]bool{}

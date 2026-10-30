@@ -34,9 +34,10 @@ v2 and later definitions carry `schema_version` as a `"MAJOR.MINOR"` string.
   [HTTP and TLS options](#http-and-tls-options) (`http`, `tls` and a
   step's `follow_redirects` and `max_redirects`), the [arrival-rate
   load](#arrival-rate-load) (`load`), [setup and
-  teardown](#setup-and-teardown) scenarios (`run_once`, `teardown`) and
-  [once-per-VU steps](#once-per-vu-steps) (`once_per_vu`) joined `"2.0"`
-  under this rule.
+  teardown](#setup-and-teardown) scenarios (`run_once`, `teardown`),
+  [once-per-VU steps](#once-per-vu-steps) (`once_per_vu`) and typed
+  [request bodies](#request-bodies) (`body_type`, `body_json`, `fields`)
+  joined `"2.0"` under this rule.
 - A reader rejects an unknown major, or a minor newer than it supports.
 
 The module version and `schema_version` move independently: schema `"2.0"`
@@ -81,14 +82,18 @@ does not mean module v2.
     step follows redirects, `client_cert` and `client_key` given together,
     inline PEM holding complete blocks of the right kind, and no blank or
     multi-line file path (see [HTTP and TLS
-    options](#http-and-tls-options)).
+    options](#http-and-tls-options));
+  - request bodies: a known `body_type`, `body` only with `raw`,
+    `body_json` (an object or array) only with and required by `json`,
+    and `fields` (string values, each name once) only with `form` (see
+    [Request bodies](#request-bodies)).
 - **v1** is read the way the v1 readers (the CLI, the cloud engine and the
   backend) read it. Unknown keys are ignored, keys match case-insensitively,
   and v2-only keys (`target.base_url`, `thresholds` at every level,
   `expected_statuses`, `http`, `tls`, `load`, a scenario's `run_once` and
   `teardown`, a step's `checks`,
-  `follow_redirects`, `max_redirects` and `once_per_vu`, and an
-  extractor's `required`,
+  `follow_redirects`, `max_redirects` and `once_per_vu`, a request's
+  `body_type`, `body_json` and `fields`, and an extractor's `required`,
   `on_fail` and `pick`) are dropped unread, whatever their value. Values are
   checked for their JSON type only:
   - **core** fields, which every v1 reader decodes: a value of the wrong
@@ -157,7 +162,9 @@ keys or levels (a step's `max_redirects` against the `follow_redirects`
 in effect for it, `client_cert` and `client_key` together), the PEM
 contents of `client_cert`, `client_key` and `ca_cert`, and blank or
 multi-line file paths. For `load` it also checks that durations are
-greater than zero and that `max_vus` is at least `preallocated_vus`.
+greater than zero and that `max_vus` is at least `preallocated_vus`. For
+`fields` it also checks that each name appears once (a JSON Schema
+validator reads a repeated key as its last value).
 
 ### Error size
 
@@ -828,6 +835,85 @@ none. In v2 it is a duration, or a range for a random pause:
   negative value as written, and the engines read a range as no pause.
 
 Think time ranges joined schema_version "2.0" while it is a preview.
+
+## Request bodies
+
+A request's `body_type` says how its body is built:
+
+| `body_type` | Body key | Sent as | Default `Content-Type` |
+|---|---|---|---|
+| `"raw"` (or absent) | `body` | the string as written, after substitution | none |
+| `"json"` | `body_json` | a JSON object or array | `application/json` |
+| `"form"` | `fields` | URL-encoded `name=value` pairs | `application/x-www-form-urlencoded` |
+
+```json
+"steps": [
+  {
+    "name": "Add to cart",
+    "request": {"method": "POST", "url": "https://shop.example.com/api/cart",
+                "body_type": "json",
+                "body_json": {"sku": "SKU-1", "qty": "${random_int(1,3)}",
+                              "gift": "${gift}", "note": "n ${uuid}", "price": 19.90}}
+  },
+  {
+    "name": "Search",
+    "request": {"method": "POST", "url": "https://shop.example.com/search",
+                "body_type": "form",
+                "fields": {"q": "red shoes & socks", "page": "${page}"}}
+  }
+]
+```
+
+- **Content-Type.** With `json` and `form` the engine sets the
+  `Content-Type` above, unless `headers` sets `Content-Type` (in any
+  case); then the request carries exactly that one header.
+- **`body_json`.** Must be an object or an array. Its keys, key order and
+  number literals (`19.90`, a 20-digit integer) are kept as written; the
+  definition stores it compacted. Each string value is substituted on its
+  own:
+  - a string that is exactly one `${...}` reference without a filter
+    takes the type of its value. A variable holding a JSON number,
+    `true`/`false`, an array or an object (a `json` extractor, `pick:
+    all`, a `run_once` global) is sent unquoted, and so is an integer
+    built-in (`random_int`, `counter`, `timestamp`, `timestamp_ms`,
+    `vu_id`, `iteration`). In the example `qty` is sent as a number such
+    as `2`, and `gift` as `true` when the variable came from a JSON
+    `true`. A variable holding a string (a CSV column, a header, a regex
+    match) and the other built-ins (`uuid`, `fake.*`, ...) are sent as
+    strings;
+  - a reference with a filter, such as `${timestamp|trim}`, is always a
+    string; this is how to send a number as a string;
+  - a string that mixes text and references, such as `"n ${uuid}"`, is
+    always a string;
+  - a reference to no variable or built-in is sent as the string written;
+  - an extractor that misses, or reads a JSON `null`, assigns `""`, so
+    its leaf is sent as `""`.
+
+  Every string sent is JSON-escaped, so a value cannot add keys or break
+  the JSON. Numbers, `true`, `false` and `null` written in `body_json` are
+  sent as written.
+- **`fields`.** An object whose values are strings, sent in the order
+  written, as `name=value` pairs joined by `&`. Each value is substituted,
+  then URL-encoded; a space becomes `+`. Do not add `|urlencode` to a
+  field value: it would be encoded twice. A name may appear only once.
+  `{}` or no `fields` sends an empty body.
+- **Literal keys.** Object keys in `body_json` and field names in `fields`
+  are sent as written (field names URL-encoded): a `${...}` in a key or a
+  name is neither substituted nor refused.
+- **Rules.** `Parse` rejects an unknown `body_type`, a non-empty `body`
+  with `json` or `form`, `body_json` without `body_type: "json"` (which
+  requires it), `fields` without `body_type: "form"`, a `body_json` that is
+  not an object or array, a field value that is not a string and a field
+  name used twice. Zero values (`""`, `fields: {}`) read as absent.
+- **Marshalling.** `encoding/json` escapes `<`, `>` and `&` in every
+  value, so `json.Marshal` of a `Definition` writes them escaped inside
+  `body_json`, as it does in `body` and `headers`; the JSON value is the
+  same, and the engine sends the characters themselves.
+- **v1.** v1 has `body` only; `body_type`, `body_json` and `fields` are
+  dropped unread.
+
+`body_type`, `body_json` and `fields` joined schema_version "2.0" while it
+is a preview.
 
 ## Compatibility
 

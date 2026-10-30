@@ -12,6 +12,7 @@ var (
 	HTTPVersionsForTest     = httpVersions
 	TLSVersionsForTest      = tlsVersions
 	LoadTypesForTest        = loadTypes
+	BodyTypesForTest        = bodyTypes
 	MinEngineReleaseForTest = minEngineRelease
 )
 

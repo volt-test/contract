@@ -1,0 +1,48 @@
+{
+  "name": "v1 definition with typed body keys",
+  "virtual_users": 2,
+  "duration": "10s",
+  "scenarios": [
+    {
+      "name": "Checkout",
+      "weight": 1,
+      "steps": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "url": "https://api.example.com/login",
+            "header": {
+              "Content-Type": "application/json"
+            },
+            "body": "{\"email\":\"user@example.com\"}",
+            "body_type": "json",
+            "body_json": {"email": "other@example.com", "price": 19.90}
+          }
+        },
+        {
+          "name": "Search",
+          "request": {
+            "method": "POST",
+            "url": "https://api.example.com/search",
+            "headers": {
+              "Content-Type": "application/x-www-form-urlencoded"
+            },
+            "body": "q=shoes",
+            "body_type": "xml",
+            "fields": {"q": "boots", "page": "2"}
+          }
+        },
+        {
+          "name": "List",
+          "request": {
+            "method": "GET",
+            "url": "https://api.example.com/items",
+            "body_json": [1, 2],
+            "fields": {}
+          }
+        }
+      ]
+    }
+  ]
+}
