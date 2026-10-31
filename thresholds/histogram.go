@@ -41,6 +41,9 @@ var (
 	ErrOverflow = errors.New("thresholds: counter overflow")
 	// ErrInvalidThreshold: a threshold that Parse would not produce.
 	ErrInvalidThreshold = errors.New("thresholds: invalid threshold")
+	// ErrMalformedSnapshot: an encoded snapshot that is not the JSON wire
+	// form, or is over a SnapshotLimits cap.
+	ErrMalformedSnapshot = errors.New("thresholds: malformed snapshot")
 )
 
 // NewHistogram returns an empty histogram with the snapshot configuration.

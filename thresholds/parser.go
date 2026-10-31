@@ -719,9 +719,15 @@ func shiftDecimal(s string, n int) string {
 // arithmetic, so they compare with a tolerance:
 //
 //	|a-b| <= 1e-9 * max(1, |a|, |b|)
+//
+// An infinite value equals only the same infinity: the tolerance would
+// otherwise be infinite too.
 func equal(k Kind, a, b float64) bool {
 	switch k {
 	case KindCount, KindSize:
+		return a == b
+	}
+	if math.IsInf(a, 0) || math.IsInf(b, 0) {
 		return a == b
 	}
 	return math.Abs(a-b) <= 1e-9*math.Max(1, math.Max(math.Abs(a), math.Abs(b)))

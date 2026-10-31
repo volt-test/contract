@@ -109,7 +109,7 @@ func equalHists(a, b *hdrhistogram.Histogram) bool {
 }
 
 func equalSnapshots(a, b *thresholds.Snapshot) bool {
-	if !a.Start.Equal(b.Start) || !a.End.Equal(b.End) || !equalScopes(&a.Test, &b.Test) {
+	if !a.Start.Equal(b.Start) || !a.End.Equal(b.End) || a.Responses != b.Responses || !equalScopes(&a.Test, &b.Test) {
 		return false
 	}
 	nonNil := func(m map[string]*thresholds.ScenarioScope) int {
@@ -157,7 +157,7 @@ func equalSnapshots(a, b *thresholds.Snapshot) bool {
 // deepCopy copies a snapshot so that a test can check an input was not
 // modified.
 func deepCopy(s *thresholds.Snapshot) *thresholds.Snapshot {
-	c := &thresholds.Snapshot{Start: s.Start, End: s.End, Test: *s.Test.Clone()}
+	c := &thresholds.Snapshot{Start: s.Start, End: s.End, Responses: s.Responses, Test: *s.Test.Clone()}
 	if s.Scenarios != nil {
 		c.Scenarios = map[string]*thresholds.ScenarioScope{}
 	}
@@ -444,6 +444,9 @@ func TestMergeErrors(t *testing.T) {
 		"end before start":          {ok, node(t, time.Second, 0, thresholds.Scope{}, nil)},
 		"failed above requests":     {ok, node(t, 0, time.Second, thresholds.Scope{Requests: 1, Failed: 2}, nil)},
 		"overflow":                  {ok, node(t, 0, time.Second, thresholds.Scope{Requests: 1<<63 - 1}, nil)},
+		"negative responses":        {ok, withResponses(node(t, 0, time.Second, thresholds.Scope{}, nil), -1)},
+		"negative responses, first": {withResponses(node(t, 0, time.Second, thresholds.Scope{}, nil), -1)},
+		"responses overflow":        {withResponses(node(t, 0, time.Second, thresholds.Scope{}, nil), 1), withResponses(node(t, 0, time.Second, thresholds.Scope{}, nil), 1<<63-1)},
 		"histogram above count": {ok, node(t, 0, time.Second, thresholds.Scope{}, map[string]*thresholds.ScenarioScope{
 			"s": {Steps: map[string]*thresholds.Scope{"a": {Duration: thresholds.Distribution{Hist: dist(t, 5).Hist}}}},
 		})},
@@ -455,6 +458,8 @@ func TestMergeErrors(t *testing.T) {
 		"end before start": thresholds.ErrInvalidScope, "failed above requests": thresholds.ErrInvalidScope,
 		"overflow": thresholds.ErrOverflow, "histogram above count": thresholds.ErrInvalidScope,
 		"no snapshots": thresholds.ErrInvalidScope, "nil snapshot": thresholds.ErrInvalidScope,
+		"negative responses": thresholds.ErrInvalidScope, "negative responses, first": thresholds.ErrInvalidScope,
+		"responses overflow": thresholds.ErrOverflow,
 	}
 	for name, nodes := range cases {
 		m, err := thresholds.Merge(nodes...)
@@ -481,6 +486,39 @@ func TestMergeErrors(t *testing.T) {
 	if !errors.Is(err, thresholds.ErrInvalidScope) || len(err.Error()) > 400 {
 		t.Errorf("long names: %d bytes: %v", len(fmt.Sprint(err)), err)
 	}
+}
+
+func withResponses(s *thresholds.Snapshot, n int64) *thresholds.Snapshot {
+	s.Responses = n
+	return s
+}
+
+// Responses add across nodes and are not tied to the request counters.
+func TestMergeResponses(t *testing.T) {
+	a := withResponses(node(t, 0, time.Second, thresholds.Scope{Requests: 10}, nil), 9)
+	b := withResponses(node(t, 0, time.Second, thresholds.Scope{Requests: 5}, nil), 5)
+	m, err := thresholds.Merge(a, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Responses != 14 || m.Test.Requests != 15 {
+		t.Errorf("responses %d, requests %d", m.Responses, m.Test.Requests)
+	}
+	if a.Responses != 9 || b.Responses != 5 {
+		t.Error("Merge modified its inputs")
+	}
+	// More responses than requests is accepted: a read taken mid-run can
+	// see a response before its request is counted.
+	over := withResponses(node(t, 0, time.Second, thresholds.Scope{Requests: 1}, nil), 2)
+	if m, err := thresholds.Merge(over); err != nil || m.Responses != 2 {
+		t.Errorf("Merge(responses > requests) = %v, %v", m, err)
+	}
+	// Exactly at the int64 limit is not an overflow.
+	if m, err := thresholds.Merge(withResponses(node(t, 0, time.Second, thresholds.Scope{}, nil), 1<<63-2),
+		withResponses(node(t, 0, time.Second, thresholds.Scope{}, nil), 1)); err != nil || m.Responses != 1<<63-1 {
+		t.Errorf("Merge at the limit = %v, %v", m, err)
+	}
+	requireMergeProperties(t, a, b)
 }
 
 // Merging is order-independent, and merging one snapshot copies it.
@@ -603,7 +641,7 @@ func (r *reader) scope(t *testing.T) thresholds.Scope {
 }
 
 func (r *reader) snapshot(t *testing.T) *thresholds.Snapshot {
-	s := &thresholds.Snapshot{Start: t0.Add(time.Duration(r.byte()) * time.Second)}
+	s := &thresholds.Snapshot{Start: t0.Add(time.Duration(r.byte()) * time.Second), Responses: int64(r.byte())}
 	s.End = s.Start.Add(time.Duration(r.byte()) * time.Second)
 	if s.End.Equal(s.Start) {
 		s.End = s.End.Add(time.Millisecond)

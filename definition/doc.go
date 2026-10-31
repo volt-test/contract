@@ -134,6 +134,11 @@
 // selectors are literal: ${variable} is not replaced. When no response is
 // received, the step's checks are not evaluated and not counted.
 //
+// Parse accepts any non-blank json selector. JSONSelectorProblems lists
+// the json check and extractor selectors outside the engine's grammar
+// ($.key, $.key[0], $.a.b[1].c; extractors also key[*], $[N] and $[*]);
+// it returns nil for v1.
+//
 // A key with its zero value ("" or []) counts as absent, with two
 // exceptions: equals and contains are values whenever written
 // ("equals": "" checks for an empty value), and exists, missing and empty
@@ -310,4 +315,12 @@
 // field name used twice; {} fields read as absent. The README section
 // "Request bodies" gives the full rules. body_type, body_json and fields
 // joined schema_version "2.0" while it is a preview.
+//
+// # VoltTest Cloud (v2)
+//
+// CloudProblems lists what VoltTest Cloud refuses in a definition Parse
+// accepts, for a run on a given number of nodes: tls file paths, ${env.*}
+// references, run_once and teardown scenarios, and a load object on more
+// than one node, in that order. It returns nil for v1. The README section
+// "VoltTest Cloud" gives the paths and messages.
 package definition

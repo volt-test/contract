@@ -41,8 +41,12 @@ type ScenarioScope struct {
 // Snapshot is the measurements of one run, or of one node's share of a
 // run, by scope. Scenarios are keyed by name. Start and End bound the
 // measurement window; rps is Requests over End-Start at every scope.
+// Responses is the number of responses received over the whole test. No
+// threshold reads it; it is there for a consumer that needs a floor on
+// the responses behind a verdict. It may differ from Test.Requests.
 type Snapshot struct {
 	Start, End time.Time
+	Responses  int64
 	Test       Scope
 	Scenarios  map[string]*ScenarioScope
 }
@@ -254,13 +258,13 @@ func (s *Scope) Clone() *Scope {
 // Merge combines node snapshots of one run into a new snapshot, leaving
 // the inputs untouched. Each scope is the sum of the nodes' scopes with the
 // same name (Scope.Add rules); a scenario or step missing on a node counts
-// as nothing measured there. Start is the earliest start and End the
-// latest end, so rps over the merged snapshot is the run's wall-clock
-// throughput, not the sum of the nodes' rates.
+// as nothing measured there. Responses add. Start is the earliest start
+// and End the latest end, so rps over the merged snapshot is the run's
+// wall-clock throughput, not the sum of the nodes' rates.
 //
 // Merge returns an error wrapping ErrInvalidScope for no snapshots, a nil
 // snapshot, a zero Start or End, an End before the Start, a negative
-// counter or a broken invariant; ErrOverflow for an
+// Responses, a negative counter or a broken invariant; ErrOverflow for an
 // overflow; and ErrHistogramConfig for a histogram without the snapshot
 // configuration. Merge allocates a histogram (about 188 KB) for every
 // distribution that has values.
@@ -279,6 +283,14 @@ func Merge(nodes ...*Snapshot) (*Snapshot, error) {
 		if n.End.Before(n.Start) {
 			return nil, fmt.Errorf("%w: snapshot %d ends before it starts", ErrInvalidScope, i)
 		}
+		if n.Responses < 0 {
+			return nil, fmt.Errorf("%w: snapshot %d has negative responses", ErrInvalidScope, i)
+		}
+		r, ok := addInt(out.Responses, n.Responses)
+		if !ok {
+			return nil, inMerge(ErrOverflow, fmt.Sprintf("snapshot %d, responses", i))
+		}
+		out.Responses = r
 		if i == 0 || n.Start.Before(out.Start) {
 			out.Start = n.Start
 		}
@@ -324,8 +336,8 @@ func Merge(nodes ...*Snapshot) (*Snapshot, error) {
 	return out, nil
 }
 
-// mergeError adds where a merge failed to an error, keeping the error
-// matchable with errors.Is.
+// mergeError adds where a merge or a decode failed to an error, keeping
+// the error matchable with errors.Is.
 type mergeError struct {
 	msg string
 	err error

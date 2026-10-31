@@ -11,7 +11,7 @@ import (
 func TestComparisonHoldsParity(t *testing.T) {
 	ops := []Op{OpLT, OpLE, OpGT, OpGE, OpEQ, 0, Op(9)}
 	kinds := []Kind{KindDuration, KindSize, KindCount}
-	bounds := []float64{0, 1, 500, 200000, 1e9, 5e9, 1 << 53}
+	bounds := []float64{0, 1, 500, 200000, 1e9, 5e9, 1 << 53, math.Inf(1), math.Inf(-1)}
 	for _, k := range kinds {
 		for _, op := range ops {
 			for _, b := range bounds {
@@ -59,6 +59,19 @@ func TestComparisonHoldsEdges(t *testing.T) {
 		{KindSize, OpLT, 50000, 49999, true},
 		{KindSize, OpLT, 50000, 50000, false},
 		{KindSize, OpGE, 5e9, 5e9 - 5, false},
+		// An infinite value is outside every finite bound.
+		{KindDuration, OpLE, 500000, math.Inf(1), false},
+		{KindDuration, OpEQ, 500000, math.Inf(1), false},
+		{KindDuration, OpLT, 500000, math.Inf(1), false},
+		{KindDuration, OpGT, 500000, math.Inf(1), true},
+		{KindDuration, OpGE, 500000, math.Inf(1), true},
+		{KindDuration, OpLE, 0, math.Inf(-1), true},
+		{KindDuration, OpLT, 0, math.Inf(-1), true},
+		{KindDuration, OpEQ, 0, math.Inf(-1), false},
+		{KindDuration, OpGE, 0, math.Inf(-1), false},
+		{KindDuration, OpGT, 0, math.Inf(-1), false},
+		{KindCount, OpLE, 1e9, math.Inf(1), false},
+		{KindSize, OpGT, 5e9, math.Inf(1), true},
 		// NaN and unknown operators never hold.
 		{KindDuration, OpLE, 1, math.NaN(), false},
 		{KindCount, OpEQ, 0, math.NaN(), false},

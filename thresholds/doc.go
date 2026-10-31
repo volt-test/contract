@@ -84,7 +84,8 @@
 //
 // For "p95 == 200ms" (200000us) any value within 0.0002us of 200000us is
 // equal. With the tolerance, < and > need a value outside the band, and
-// <= and >= accept one inside it.
+// <= and >= accept one inside it. An infinite value equals only the same
+// infinity, so +Inf fails "p95 <= 500ms" and passes "p95 > 500ms".
 //
 // # Canonical form
 //
@@ -190,6 +191,47 @@
 // hdrhistogram.Decode can hang or allocate without bound on a crafted
 // header.
 //
+// # Wire form
+//
+// EncodeSnapshot and DecodeSnapshot carry a Snapshot as JSON, so that a
+// node can send its share of a run and a reader can merge the shares:
+//
+//	{"start": "2026-10-16T12:00:00Z", "end": "2026-10-16T12:01:00.5Z",
+//	 "responses": 1000,
+//	 "test": SCOPE,
+//	 "scenarios": {"NAME": SCOPE plus "steps": {"NAME": SCOPE}}}
+//
+//	SCOPE  "requests", "failed", "bytes_sent", "bytes_received": required
+//	       "checks", "checks_passed", "iterations", "dropped_iterations":
+//	       left out when not measured
+//	       "duration", "ttfb", "iteration_duration": DIST, left out when
+//	       there are no values
+//	DIST   "count", "sum_us", "min_us", "max_us": required, count > 0
+//	       "hdr": the EncodeHistogram text, left out when there is no
+//	       histogram
+//
+// Times are RFC 3339 with nanoseconds. An optional counter that is absent
+// or null decodes as nil (not measured); 0 is a measured zero. hdr is a
+// JSON string, so it carries the base64 text once; a Go []byte field
+// would encode it a second time. Keys are lower case; DecodeSnapshot, like
+// encoding/json, also matches them ignoring ASCII case, but writers use
+// the lower-case form. Unknown keys are ignored, so keys can be added; a
+// key of the top object, a scope or a distribution is plain ASCII of at
+// most 32 bytes, without escapes, and each key of the wire form appears
+// at most once in its object, matched ignoring ASCII case, or
+// DecodeSnapshot refuses the snapshot. An unknown key may repeat.
+// Scenario and step names are JSON strings: a name that is not valid
+// UTF-8 is not carried exactly. EncodeSnapshot writes valid UTF-8, and
+// DecodeSnapshot refuses input that is not.
+//
+// DecodeSnapshot is for bytes from another process. SnapshotLimits caps
+// the size of the input, the number of scopes and of histograms, and the
+// length of names, and every cap is checked before any histogram is
+// decoded. It refuses a scenario, or a step of one scenario, named twice,
+// and checks every scope as Scope.Validate does, so a decoded snapshot is
+// ready for Merge and Evaluate. Re-encoding a decoded snapshot gives back
+// the same snapshot (compared by value; the bytes can differ).
+//
 // # Concurrency
 //
 // Snapshots, scopes and histograms are not safe for concurrent use.
@@ -220,6 +262,7 @@
 //     none, so they allocate a histogram only when there is something to
 //     copy.
 //   - Start is the earliest start and End the latest end.
+//   - Snapshot.Responses add; Merge rejects a negative one.
 //
 // Every scope must satisfy Failed <= Requests, ChecksPassed <= Checks when
 // both are set, and Hist.TotalCount() <= Count for each distribution (a
