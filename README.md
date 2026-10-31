@@ -9,7 +9,7 @@ itself is proprietary and is not part of this repository.
 
 | Package | Contents |
 |---|---|
-| `definition` | Test-definition types, `Parse`, schema_version checks |
+| `definition` | Test-definition types, `Parse`, schema_version checks, VoltTest Cloud refusals |
 | `thresholds` | Threshold expressions (parser, metric catalog, scopes) and the evaluator: snapshots, node merge, results |
 
 Runtime dependency: `thresholds` uses
@@ -270,6 +270,43 @@ every threshold of a parsed definition as a `thresholds.Bound` with the
 scenario and step it applies to. Values are held in canonical units:
 microseconds, fractions (1% is 0.01) and bytes.
 
+### Snapshots on the wire
+
+A run on several nodes is judged on the nodes' measurements merged:
+each node sends a snapshot, and the reader merges them
+(`thresholds.Merge`) and evaluates the result. `thresholds.EncodeSnapshot`
+writes a snapshot as JSON and `thresholds.DecodeSnapshot` reads it back:
+
+```json
+{
+  "start": "2026-10-16T12:00:00Z", "end": "2026-10-16T12:01:00Z", "responses": 1000,
+  "test": {"requests": 1000, "failed": 2, "bytes_sent": 50000, "bytes_received": 900000,
+           "checks": 2000, "checks_passed": 1998,
+           "duration": {"count": 1000, "sum_us": 41250000, "min_us": 1200, "max_us": 980000, "hdr": "HISTFAAA..."}},
+  "scenarios": {"Browse": {"requests": 1000, "failed": 2, "bytes_sent": 50000, "bytes_received": 900000,
+                           "steps": {"Home": {"requests": 1000, "failed": 2, "bytes_sent": 50000, "bytes_received": 900000}}}}
+}
+```
+
+- `requests`, `failed`, `bytes_sent` and `bytes_received` are required in
+  every scope. `checks`, `checks_passed`, `iterations` and
+  `dropped_iterations` are left out when not measured, which is not the
+  same as 0.
+- `duration`, `ttfb` and `iteration_duration` are left out when there
+  are no values. When present they need `count` (above 0), `sum_us`,
+  `min_us` and `max_us`; `hdr` is the scope's HDR histogram as a JSON
+  string, in the encoding of `thresholds.EncodeHistogram`.
+- Keys are lower case, and unknown keys are ignored. Every key other
+  than a scenario or step name is plain ASCII of at most 32 bytes,
+  without escapes. Each key of the wire form appears once at most in
+  its object, matched ignoring ASCII case; an unknown key may repeat.
+- `DecodeSnapshot` is safe on input from another process. Its
+  `SnapshotLimits` cap the size (32 MiB by default), the scopes (1024),
+  the histograms (256) and the name length (4096 bytes), and are checked
+  before any histogram is decoded. It refuses input that is not valid
+  UTF-8, a name used twice, a missing required key and a scope that
+  breaks the snapshot invariants.
+
 ## Checks
 
 A v2 step can carry `checks`: assertions on its response. Each check has
@@ -330,6 +367,14 @@ optional `name` and `on_fail`.
   tags), with leading and trailing white space trimmed: the same value an
   `html` extractor without `attribute` reads. `<h1> <b>Sale</b> </h1>`
   equals `"Sale"`. `exists` passes when any element matches.
+- A `json` selector is an optional `$.` prefix, then keys separated by
+  `.`: `$.key`, `$.key[0]` or `$.a.b[1].c`, with `N` in `[N]` a decimal
+  index. A key before `[N]` uses only letters, digits, `_` and `-`; any
+  other key is any text but `*` without `.`, `[`, `]` or white space.
+  `$` alone, wildcards, filters, bracket keys (`$['a']`), `..`, and
+  negative or chained indexes (`a[0][1]`) are refused. `Parse` accepts
+  any non-blank selector; `definition.JSONSelectorProblems(def)` lists
+  the ones the VoltTest engine refuses, at `checks[k].selector`.
 - Check values and selectors are literal: a `${variable}` in them is
   compared as written, not replaced by the variable's value.
 - When no response is received (a transport error or a timeout), the
@@ -385,6 +430,13 @@ when its selector finds several, or finds an array: `random`, `first`,
 `last` or `all`. It is rejected on `header` and `cookie` extractors. A
 JSON path can match every element of an array with `[*]`, as in
 `$.items[*].id`.
+
+A `json` extractor's selector takes the [check grammar](#checks) plus
+`key[*]` (`$.items[*].id`, `$.a[*].b[*]`), and `$[0]` or `$[*]` on a
+document that is an array. A key before `[*]` follows the `[N]` rule.
+`definition.JSONSelectorProblems(def)` lists the selectors outside this
+grammar, at `extract[k].selector`; it returns nil for a v1 definition,
+whose extractors keep the v1 rules.
 
 ```json
 "extract": [
@@ -742,7 +794,8 @@ run its load scenario once.)
   extracts. Two steps of the same setup scenario may extract the same
   variable. `false` and a `weight` of 0 read as absent.
 - **Cloud.** VoltTest Cloud does not run setup or teardown scenarios yet
-  and rejects a definition that has them.
+  and rejects a definition that has them (see
+  [VoltTest Cloud](#volttest-cloud)).
 
 `run_once` and `teardown` joined schema_version "2.0" while it is a
 preview.
@@ -914,6 +967,44 @@ A request's `body_type` says how its body is built:
 
 `body_type`, `body_json` and `fields` joined schema_version "2.0" while it
 is a preview.
+
+## VoltTest Cloud
+
+A definition that `Parse` accepts can still be refused by VoltTest Cloud.
+`definition.CloudProblems(def, nodes)` lists the refusals for a run on
+`nodes` nodes, so every reader refuses the same things with the same
+paths and messages:
+
+```go
+if ps := definition.CloudProblems(def, nodes); len(ps) > 0 {
+	return &definition.ValidationError{Problems: ps}
+}
+```
+
+It reports, in this order:
+
+1. **File paths in `tls`.** A `client_cert`, `client_key` or `ca_cert`
+   that is not inline PEM (`IsInlinePEM`): a cloud node cannot read a
+   file. The value is never repeated.
+2. **`${env.NAME}` references.** A cloud node's environment holds its own
+   settings, not yours. Each distinct reference is reported as written,
+   filters included, at each path where it appears: `target.base_url`,
+   then for each step the request `url`, `body`, every string value in
+   `body_json`, every value in `fields` and every header, by sorted name.
+   A reference runs from `${` to the first `}`; an unterminated `${env.X`
+   is literal. Keys in `body_json` and names in `fields` are sent as
+   written, so a reference in one is not refused.
+3. **Setup and teardown.** Each `run_once` and each `teardown` scenario,
+   at that flag.
+4. **Arrival rate on several nodes.** A `load` object when `nodes` is more
+   than 1, at `load`.
+
+Paths name keys the way `Parse` does: `headers.Accept`, or
+`headers["X Y"]` for a key that is not letters, digits, `_` and `-`, cut
+to about 128 bytes. It returns nil for a v1 definition. The list is not
+capped; `ValidationError.Error` shows the first 100. Thresholds are not
+part of it: whether a metric is measured depends on the engine release
+that runs the test.
 
 ## Compatibility
 

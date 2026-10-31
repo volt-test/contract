@@ -1,6 +1,7 @@
 package thresholds
 
 import (
+	"math"
 	"testing"
 
 	hdrhistogram "github.com/HdrHistogram/hdrhistogram-go"
@@ -48,6 +49,18 @@ func TestEqual(t *testing.T) {
 		{KindThroughput, 100, 100.000001, false},
 		// 0.07% parsed and measured the same way.
 		{KindRate, 0.07 / 100, 0.0007, true},
+		// An infinite value equals only the same infinity, never a
+		// finite bound, however large.
+		{KindDuration, math.Inf(1), 500000, false},
+		{KindDuration, math.Inf(1), 1e300, false},
+		{KindDuration, math.Inf(-1), 0, false},
+		{KindDuration, math.Inf(1), math.Inf(1), true},
+		{KindDuration, math.Inf(-1), math.Inf(-1), true},
+		{KindDuration, math.Inf(1), math.Inf(-1), false},
+		{KindRate, math.Inf(1), 0.5, false},
+		{KindThroughput, math.Inf(1), 100, false},
+		{KindCount, math.Inf(1), 1e9, false},
+		{KindSize, math.Inf(1), math.Inf(1), true},
 	}
 	for _, tc := range cases {
 		if got := equal(tc.kind, tc.a, tc.b); got != tc.want {
