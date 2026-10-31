@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -99,24 +98,33 @@ type wireInt struct {
 	set bool
 }
 
-var int64Type = reflect.TypeOf(int64(0))
+// errWireType is the refusal of a wire type's UnmarshalJSON. checkKeys
+// refuses the same values first, naming the key: encoding/json reports
+// where a method's error happened differently across Go versions.
+var errWireType = errors.New("wrong type")
 
 func (w *wireInt) UnmarshalJSON(b []byte) error {
 	if string(b) == "null" {
 		*w = wireInt{}
 		return nil
 	}
-	// No int64 takes more than 20 bytes. Refusing longer input before
-	// parsing it keeps a huge literal from being copied.
-	if len(b) > 20 {
-		return &json.UnmarshalTypeError{Value: "number", Type: int64Type}
-	}
-	v, err := strconv.ParseInt(string(b), 10, 64)
-	if err != nil {
-		return &json.UnmarshalTypeError{Value: "number", Type: int64Type}
+	v, ok := wireIntValue(b)
+	if !ok {
+		return errWireType
 	}
 	*w = wireInt{v: v, set: true}
 	return nil
+}
+
+// wireIntValue parses an integer literal. No int64 takes more than 20
+// bytes: refusing longer input before parsing it keeps a huge literal
+// from being copied.
+func wireIntValue(b []byte) (int64, bool) {
+	if len(b) > 20 {
+		return 0, false
+	}
+	v, err := strconv.ParseInt(string(b), 10, 64)
+	return v, err == nil
 }
 
 // wireTime is a time that records whether its key was present and not
@@ -126,19 +134,25 @@ type wireTime struct {
 	set bool
 }
 
-var timeType = reflect.TypeOf(time.Time{})
-
 func (w *wireTime) UnmarshalJSON(b []byte) error {
 	if string(b) == "null" {
 		*w = wireTime{}
 		return nil
 	}
-	var t time.Time
-	if len(b) > 64 || t.UnmarshalJSON(b) != nil {
-		return &json.UnmarshalTypeError{Value: "string", Type: timeType}
+	t, ok := wireTimeValue(b)
+	if !ok {
+		return errWireType
 	}
 	*w = wireTime{t: t, set: true}
 	return nil
+}
+
+func wireTimeValue(b []byte) (time.Time, bool) {
+	var t time.Time
+	if len(b) > 64 || t.UnmarshalJSON(b) != nil {
+		return time.Time{}, false
+	}
+	return t, true
 }
 
 // wireHDR is the hdr text. EncodeSnapshot writes it as base64 in a JSON
@@ -148,18 +162,20 @@ func (w *wireTime) UnmarshalJSON(b []byte) error {
 // than DecodeHistogram accepts or that has an escape.
 type wireHDR string
 
-var hdrType = reflect.TypeOf(wireHDR(""))
-
 func (h *wireHDR) UnmarshalJSON(b []byte) error {
 	// null leaves the value as it is, as for any string.
 	if string(b) == "null" {
 		return nil
 	}
-	if len(b) < 2 || b[0] != '"' || len(b)-2 > maxEncodedHistogram || bytes.IndexByte(b, '\\') >= 0 {
-		return &json.UnmarshalTypeError{Value: "string", Type: hdrType}
+	if !plainHDR(b) {
+		return errWireType
 	}
 	*h = wireHDR(b[1 : len(b)-1])
 	return nil
+}
+
+func plainHDR(b []byte) bool {
+	return len(b) >= 2 && b[0] == '"' && len(b)-2 <= maxEncodedHistogram && bytes.IndexByte(b, '\\') < 0
 }
 
 type wireDistIn struct {
@@ -571,17 +587,22 @@ var memberKeys = [...][]string{
 // some decodes allocate (an object again after a null, a copy of an hdr
 // or of raw scenarios or steps, a time zone for a time whose offset is
 // not whole hours), so a flood of one key would cost many times the
-// input. An unknown key may repeat: encoding/json skips it. checkKeys
-// then checks the same way each member that encoding/json decodes as an
-// object below it: the test in the top object, and the distributions of
-// a scope. It does not enter scenarios or steps, whose keys are names and
-// which DecodeSnapshot checks as it walks them. raw is valid JSON; a
-// value that is not an object is left to encoding/json, which reports its
-// type. The keys it has passed are plain ASCII, so encoding/json matches
-// them as keyIs does.
-func checkKeys(raw []byte, kind int, at place, dist string) error {
+// input. An unknown key may repeat: encoding/json skips it. It refuses,
+// naming the key, a value of memberKeys that is not null and not of the
+// key's type. checkKeys then checks the same way each member that
+// encoding/json decodes as an object below it: the test in the top
+// object, and the distributions of a scope. It does not enter scenarios
+// or steps, whose keys are names and which DecodeSnapshot checks as it
+// walks them. raw is valid JSON; path is its key path, for messages. The
+// keys it has passed are plain ASCII, so encoding/json matches them as
+// keyIs does.
+func checkKeys(raw []byte, kind int, at place, path string) error {
 	i := skipSpace(raw, 0)
 	if i >= len(raw) || raw[i] != '{' {
+		// Every value below the top has been checked as null or an object.
+		if kind == keysTop && i < len(raw) && raw[i] != 'n' {
+			return fmt.Errorf("%w: not an object", ErrMalformedSnapshot)
+		}
 		return nil
 	}
 	where := func() string {
@@ -589,9 +610,22 @@ func checkKeys(raw []byte, kind int, at place, dist string) error {
 		case keysScope:
 			return at.String() + ": "
 		case keysDist:
-			return at.String() + ", " + dist + ": "
+			return at.String() + ", " + path[strings.LastIndexByte(path, '.')+1:] + ": "
 		}
 		return ""
+	}
+	// below is the key path of a member; field names it in messages.
+	below := func(name string) string {
+		if path == "" {
+			return name
+		}
+		return path + "." + name
+	}
+	field := func(name string) string {
+		if at.depth > 0 {
+			return at.String() + ": " + below(name)
+		}
+		return below(name)
 	}
 	names := memberKeys[kind]
 	if kind == keysScope && at.depth != 1 {
@@ -615,11 +649,14 @@ func checkKeys(raw []byte, kind int, at place, dist string) error {
 				return fmt.Errorf("%w: %s%q appears twice", ErrMalformedSnapshot, where(), name)
 			}
 			seen |= 1 << j
+			if msg := badValue(name, value); msg != "" {
+				return fmt.Errorf("%w: %s: %s", ErrMalformedSnapshot, field(name), msg)
+			}
 			switch {
 			case kind == keysTop && name == "test":
-				err = checkKeys(value, keysScope, place{}, "")
+				err = checkKeys(value, keysScope, place{}, below(name))
 			case kind == keysScope && (name == "duration" || name == "ttfb" || name == "iteration_duration"):
-				err = checkKeys(value, keysDist, at, name)
+				err = checkKeys(value, keysDist, at, below(name))
 			}
 			break
 		}
@@ -627,6 +664,35 @@ func checkKeys(raw []byte, kind int, at place, dist string) error {
 			return err
 		}
 	}
+}
+
+// badValue says why value, of the wire key name, is refused, or is empty
+// when it is null or of the key's type.
+func badValue(name string, value []byte) string {
+	if string(value) == "null" {
+		return ""
+	}
+	switch name {
+	case "start", "end":
+		if _, ok := wireTimeValue(value); !ok {
+			return "not an RFC 3339 time"
+		}
+	case "hdr":
+		if !plainHDR(value) {
+			return fmt.Sprintf("not a string of at most %d bytes without escapes", maxEncodedHistogram)
+		}
+	case "test", "duration", "ttfb", "iteration_duration":
+		if value[0] != '{' {
+			return "not an object"
+		}
+	case "scenarios", "steps":
+		// Walked by DecodeSnapshot, which refuses a non-object.
+	default:
+		if _, ok := wireIntValue(value); !ok {
+			return "wrong type or out of range"
+		}
+	}
+	return ""
 }
 
 // plainKey reports whether the quoted key lit is at most maxMemberKey
@@ -798,39 +864,18 @@ func jsonString(lit []byte) (string, error) {
 }
 
 // jsonError turns an encoding/json error into a bounded message: the
-// error's own text can repeat a whole input literal.
+// error's own text can repeat a whole input literal. checkKeys has
+// refused, naming the key, every value encoding/json could refuse on
+// valid JSON, so only a syntax error is expected here.
 func jsonError(err error, at string) error {
 	if at != "" {
 		at += ": "
 	}
 	var se *json.SyntaxError
-	var te *json.UnmarshalTypeError
-	switch {
-	case errors.As(err, &se):
+	if errors.As(err, &se) {
 		return fmt.Errorf("%w: %sinvalid JSON at byte %d", ErrMalformedSnapshot, at, se.Offset)
-	case errors.As(err, &te) && te.Type == timeType:
-		return fmt.Errorf("%w: %s%s: not an RFC 3339 time", ErrMalformedSnapshot, at, cutShort(wireField(te.Field)))
-	case errors.As(err, &te) && te.Type == hdrType:
-		return fmt.Errorf("%w: %s%s: not a string of at most %d bytes without escapes", ErrMalformedSnapshot, at, cutShort(wireField(te.Field)), maxEncodedHistogram)
-	case errors.As(err, &te) && wireField(te.Field) != "":
-		return fmt.Errorf("%w: %s%s: wrong type or out of range", ErrMalformedSnapshot, at, cutShort(wireField(te.Field)))
-	case errors.As(err, &te):
-		return fmt.Errorf("%w: %snot an object", ErrMalformedSnapshot, at)
 	}
-	return fmt.Errorf("%w: %sinvalid JSON", ErrMalformedSnapshot, at)
-}
-
-// wireField is the JSON path of a field in an UnmarshalTypeError,
-// without the Go names of embedded structs, which some Go versions add.
-func wireField(f string) string {
-	parts := strings.Split(f, ".")
-	keep := parts[:0]
-	for _, p := range parts {
-		if !strings.HasPrefix(p, "wire") {
-			keep = append(keep, p)
-		}
-	}
-	return strings.Join(keep, ".")
+	return fmt.Errorf("%w: %swrong type", ErrMalformedSnapshot, at)
 }
 
 func inSnapshot(err error, where string) error {

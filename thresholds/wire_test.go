@@ -418,6 +418,19 @@ func TestDecodeSnapshotRefuses(t *testing.T) {
 		{"escaped hdr", head[:len(head)-1] + `,"duration":{` + distKeys + `,"hdr":"` + esc("0041") + `"}}}`, thresholds.ErrMalformedSnapshot, "hdr: not a string of at most 524288 bytes without escapes"},
 		{"hdr number", head[:len(head)-1] + `,"duration":{` + distKeys + `,"hdr":5}}}`, thresholds.ErrMalformedSnapshot, "hdr: not a string"},
 		{"scenario hdr object", head + `,"scenarios":{"a":{` + scopeKeys + `,"ttfb":{` + distKeys + `,"hdr":{}}}}}`, thresholds.ErrMalformedSnapshot, `scenario "a": ttfb.hdr: not a string`},
+		// Every refused value is named by its key path.
+		{"bad end", strings.Replace(head, `12:01:00Z`, `noon`, 1) + `}`, thresholds.ErrMalformedSnapshot, `malformed snapshot: end: not an RFC 3339 time`},
+		{"test counter string", strings.Replace(head, `"requests":3`, `"requests":"3"`, 1) + `}`, thresholds.ErrMalformedSnapshot, `malformed snapshot: test.requests: wrong type or out of range`},
+		{"optional counter float", head[:len(head)-1] + `,"checks":1.5}}`, thresholds.ErrMalformedSnapshot, `malformed snapshot: test.checks: wrong type or out of range`},
+		{"distribution counter exponent", head[:len(head)-1] + `,"ttfb":{` + strings.Replace(distKeys, `"max_us":5`, `"max_us":1e3`, 1) + `}}}`, thresholds.ErrMalformedSnapshot, `malformed snapshot: test.ttfb.max_us: wrong type or out of range`},
+		{"distribution counter overflow", head[:len(head)-1] + `,"ttfb":{` + strings.Replace(distKeys, `"max_us":5`, `"max_us":9223372036854775808`, 1) + `}}}`, thresholds.ErrMalformedSnapshot, `malformed snapshot: test.ttfb.max_us: wrong type or out of range`},
+		{"step hdr number", head + `,"scenarios":{"a":{` + scopeKeys + `,"steps":{"b":{` + scopeKeys + `,"duration":{` + distKeys + `,"hdr":5}}}}}}`, thresholds.ErrMalformedSnapshot, `malformed snapshot: scenario "a", step "b": duration.hdr: not a string`},
+		{"step distribution counter", head + `,"scenarios":{"a":{` + scopeKeys + `,"steps":{"b":{` + scopeKeys + `,"TTFB":{` + strings.Replace(distKeys, `"count":1`, `"count":true`, 1) + `}}}}}}`, thresholds.ErrMalformedSnapshot, `malformed snapshot: scenario "a", step "b": ttfb.count: wrong type`},
+		{"test number", `{` + wireStart + `,"test":5}`, thresholds.ErrMalformedSnapshot, `malformed snapshot: test: not an object`},
+		{"test distribution array", head[:len(head)-1] + `,"duration":[]}}`, thresholds.ErrMalformedSnapshot, `malformed snapshot: test.duration: not an object`},
+		{"scenario distribution string", head + `,"scenarios":{"a":{` + scopeKeys + `,"iteration_duration":"x"}}}`, thresholds.ErrMalformedSnapshot, `malformed snapshot: scenario "a": iteration_duration: not an object`},
+		{"top number", `5`, thresholds.ErrMalformedSnapshot, "malformed snapshot: not an object"},
+		{"top string", ` "x" `, thresholds.ErrMalformedSnapshot, "malformed snapshot: not an object"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := thresholds.DecodeSnapshot([]byte(c.doc), thresholds.SnapshotLimits{})
@@ -993,6 +1006,11 @@ func FuzzDecodeSnapshot(f *testing.F) {
 			if len(err.Error()) > 1024 {
 				t.Fatalf("message of %d bytes", len(err.Error()))
 			}
+			// On valid JSON every refused value is named by its key path:
+			// neither jsonError's fallback nor an empty path.
+			if msg := unquoted(err.Error()); json.Valid(data) && (strings.HasSuffix(msg, ": wrong type") || strings.Contains(msg, ": : ")) {
+				t.Fatalf("refusal without a key path: %v", err)
+			}
 			return
 		}
 		if _, err := thresholds.Merge(s); err != nil {
@@ -1010,4 +1028,21 @@ func FuzzDecodeSnapshot(f *testing.F) {
 			t.Fatalf("round trip changed the snapshot:\n%s\n%s", data, b)
 		}
 	})
+}
+
+// unquoted is msg without its quoted names, which may hold any text.
+func unquoted(msg string) string {
+	var b strings.Builder
+	in := false
+	for i := 0; i < len(msg); i++ {
+		switch c := msg[i]; {
+		case in && c == '\\':
+			i++
+		case c == '"':
+			in = !in
+		case !in:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
 }
