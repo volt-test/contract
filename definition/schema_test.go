@@ -72,7 +72,7 @@ func generateSchema(t *testing.T) []byte {
 	s.Description = "A VoltTest load test: the load profile, the system under test and the scenarios that virtual users run."
 	typeDescriptions := map[string]string{
 		"Stage":        "One stage of a staged load profile.",
-		"RegionWeight": "One cloud region's share of the virtual users.",
+		"RegionWeight": "One VoltTest Cloud region and its percent of the virtual users.",
 		"Target":       "The system under test.",
 		"Scenario":     "A sequence of steps that a virtual user runs.",
 		"DataConfig":   "A CSV data source. Each virtual user takes rows according to mode.",
@@ -117,9 +117,10 @@ func generateSchema(t *testing.T) []byte {
 }
 
 // loadModels adds the load model rules: the top-level choice between
-// stages, virtual_users and load, and the keys each load type requires or
-// forbids. Zero values read as absent, so a forbidden key may still be
-// written with its zero value.
+// stages, virtual_users and load, the keys each load type requires or
+// forbids, and a ramping_rate stage with a target above 0. Zero values
+// read as absent, so a forbidden key may still be written with its zero
+// value.
 func loadModels(s *jsonschema.Schema) {
 	zero, one := uint64(0), uint64(1)
 	noLoad := &jsonschema.Schema{Required: []string{"load"}}
@@ -147,7 +148,11 @@ func loadModels(s *jsonschema.Schema) {
 	ramping.Set("type", &jsonschema.Schema{Const: string(definition.LoadRampingRate)})
 	ramping.Set("rate", &jsonschema.Schema{Maximum: json.Number("0")})
 	ramping.Set("duration", &jsonschema.Schema{MaxLength: &zero})
-	ramping.Set("stages", &jsonschema.Schema{MinItems: &one})
+	running := jsonschema.NewProperties()
+	running.Set("target", &jsonschema.Schema{Minimum: json.Number("1")})
+	ramping.Set("stages", &jsonschema.Schema{MinItems: &one, Contains: &jsonschema.Schema{
+		Required: []string{"target"}, Properties: running,
+	}})
 	s.Definitions["Load"].AnyOf = []*jsonschema.Schema{
 		{Required: []string{"rate", "duration"}, Properties: rate},
 		{Required: []string{"stages"}, Properties: ramping},

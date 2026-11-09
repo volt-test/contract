@@ -25,6 +25,7 @@ var loadFixtureProblems = map[string][]string{
 	"structure_load_ramping_no_stages.json":             {`load.stages: is required for type ramping_rate (at least one stage)`},
 	"structure_load_ramping_stage_zero_duration.json":   {`load.stages[1].duration: must be greater than zero`},
 	"structure_load_ramping_stage_negative_target.json": {`load.stages[0].target: must not be negative`},
+	"structure_load_ramping_all_zero.json":              {`load: never exceeds a rate of 0, so the run would do nothing; set a stage target above 0`},
 	"structure_load_ramping_rate.json":                  {`load.rate: does not apply to type ramping_rate; set each stage's target`},
 	"structure_load_ramping_duration.json":              {`load.duration: does not apply to type ramping_rate; the stages set the length`},
 	"structure_load_with_virtual_users.json":            {`load: cannot be combined with virtual_users, duration`},
@@ -84,6 +85,10 @@ func loadDoc(t *testing.T, load map[string]any, edit func(m map[string]any)) []b
 	})
 }
 
+// rampingZero is the problem for a ramping_rate load whose every stage
+// target is 0.
+const rampingZero = "load: never exceeds a rate of 0, so the run would do nothing; set a stage target above 0"
+
 // TestLoadRules covers the load rules that have no fixture of their own.
 // Every definition Parse accepts must pass the schema too.
 func TestLoadRules(t *testing.T) {
@@ -118,7 +123,8 @@ func TestLoadRules(t *testing.T) {
 			m["stages"] = []any{}
 		}, nil},
 		{"ramping", ramping(stage("1m", 100), stage("30s", 0)), nil, nil},
-		{"ramping with all-zero targets", ramping(stage("1m", 0), map[string]any{"duration": "1m"}), nil, nil},
+		{"ramping from 0 to 1", ramping(stage("1m", 0), stage("1m", 1)), nil, nil},
+		{"ramping to 1", ramping(stage("1m", 1)), nil, nil},
 		{"ramping with zero rate and empty duration", map[string]any{
 			"type": "ramping_rate", "rate": 0, "duration": "", "stages": []any{stage("1m", 1)}, "preallocated_vus": 1,
 		}, nil, nil},
@@ -132,6 +138,11 @@ func TestLoadRules(t *testing.T) {
 		{"bad duration", rate("duration", "5"), nil, []string{
 			`load.duration: must be a duration such as "30s" or "1m30s", got "5"`}},
 		{"stage without duration", ramping(map[string]any{"target": 5}), nil, []string{"load.stages[0].duration: is required"}},
+		{"ramping to 0", ramping(stage("1m", 0)), nil, []string{rampingZero}},
+		{"ramping with all-zero targets", ramping(stage("1m", 0), stage("1m", 0), stage("1m", 0)), nil, []string{rampingZero}},
+		{"ramping with an absent target", ramping(stage("1m", 0), map[string]any{"duration": "1m"}), nil, []string{rampingZero}},
+		{"ramping with a negative target", ramping(stage("1m", -5), stage("1m", 0)), nil, []string{
+			"load.stages[0].target: must not be negative"}},
 		{"unknown type skips the type rules", map[string]any{"type": "burst", "preallocated_vus": 1}, nil, []string{
 			`load.type: must be one of "rate", "ramping_rate", got "burst"`}},
 		{"load with ramp_up", rate(), func(m map[string]any) { m["ramp_up"] = "10s" }, []string{

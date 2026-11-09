@@ -13,7 +13,6 @@ const (
 	cloudPEMPath  = "must be inline PEM on VoltTest Cloud (a file path cannot be read on a cloud node)"
 	cloudRunOnce  = "run_once scenarios are not supported on VoltTest Cloud yet; run them with the headless engine"
 	cloudTeardown = "teardown scenarios are not supported on VoltTest Cloud yet; run them with the headless engine"
-	cloudRate     = "a rate load is not supported on more than one node on VoltTest Cloud yet"
 )
 
 // cloudEnv is the problem for an ${env.*} reference ref at path.
@@ -188,22 +187,16 @@ func TestCloudProblemsSetupTeardown(t *testing.T) {
 	wantCloudProblems(t, doc(`{"name": "s", `+step+`}`), 1, nil)
 }
 
-// A load object is refused on more than one node; a constant or staged
-// load is not.
+// No load model is refused on any node count.
 func TestCloudProblemsNodes(t *testing.T) {
 	const scenarios = `"scenarios": [{"name": "s", "steps": [{"name": "a", "request": {"method": "GET", "url": "https://x.test"}}]}]`
 	rate := []byte(`{"schema_version": "2.0", "name": "t", "load": {"type": "rate", "rate": 5, "duration": "1s", "preallocated_vus": 1}, ` + scenarios + `}`)
 	ramping := []byte(`{"schema_version": "2.0", "name": "t", "load": {"type": "ramping_rate", "stages": [{"duration": "1s", "target": 5}], "preallocated_vus": 1}, ` + scenarios + `}`)
 	constant := []byte(`{"schema_version": "2.0", "name": "t", "virtual_users": 1, "duration": "1s", ` + scenarios + `}`)
 	staged := []byte(`{"schema_version": "2.0", "name": "t", "stages": [{"duration": "1s", "target": 2}], ` + scenarios + `}`)
-	refused := []definition.Problem{{Path: "load", Message: cloudRate}}
-	for _, n := range []int{-1, 0, 1} {
+	for _, n := range []int{-1, 0, 1, 2, 3, 100} {
 		wantCloudProblems(t, rate, n, nil)
 		wantCloudProblems(t, ramping, n, nil)
-	}
-	for _, n := range []int{2, 3, 100} {
-		wantCloudProblems(t, rate, n, refused)
-		wantCloudProblems(t, ramping, n, refused)
 		wantCloudProblems(t, constant, n, nil)
 		wantCloudProblems(t, staged, n, nil)
 	}
@@ -219,7 +212,7 @@ func TestCloudProblemsThresholds(t *testing.T) {
 }
 
 // The refusals come in a fixed order: tls, ${env.*} (base_url first, then
-// steps), run_once and teardown, then load.
+// steps), then run_once and teardown.
 func TestCloudProblemsOrder(t *testing.T) {
 	data := []byte(`{"schema_version": "2.0", "name": "t",
 		"load": {"type": "rate", "rate": 5, "duration": "1s", "preallocated_vus": 1},
@@ -239,7 +232,6 @@ func TestCloudProblemsOrder(t *testing.T) {
 		cloudEnv("scenarios[1].steps[0].request.headers.B", "${env.HB}"),
 		{Path: "scenarios[0].run_once", Message: cloudRunOnce},
 		{Path: "scenarios[2].teardown", Message: cloudTeardown},
-		{Path: "load", Message: cloudRate},
 	})
 }
 

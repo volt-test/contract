@@ -693,7 +693,7 @@ response times. It replaces `virtual_users`, `duration`, `ramp_up` and
 | `type` | both, required | `"rate"` or `"ramping_rate"`. |
 | `rate` | `rate`, required | Iterations started per `time_unit`, at least 1. |
 | `duration` | `rate`, required | How long the test runs, greater than zero. |
-| `stages` | `ramping_rate`, required | At least one `{duration, target}`. The rate starts at 0 and moves linearly to each stage's `target` (0 or more) over that stage's `duration` (greater than zero). |
+| `stages` | `ramping_rate`, required | At least one `{duration, target}`. The rate starts at 0 and moves linearly to each stage's `target` (0 or more) over that stage's `duration` (greater than zero). At least one `target` must be above 0. |
 | `time_unit` | both | The period `rate` and `target` count over. Default `"1s"`; must be greater than zero. |
 | `preallocated_vus` | both, required | Virtual users started before the test begins, at least 1. |
 | `max_vus` | both | Most virtual users the test may run, at least `preallocated_vus`. `0` or absent means `preallocated_vus`. |
@@ -703,6 +703,10 @@ response times. It replaces `virtual_users`, `duration`, `ramp_up` and
 - An iteration that is due starts on an idle virtual user. When none is
   idle and fewer than `max_vus` run, a new one starts; otherwise the
   iteration is dropped and counted.
+- A `"ramping_rate"` load whose every stage `target` is 0 would start no
+  iterations, so `Parse` refuses it at `load`: "never exceeds a rate of 0,
+  so the run would do nothing; set a stage target above 0". A negative
+  `target` is reported at that stage instead.
 - There is no `start_rate`.
 - `Parse` leaves the defaults to the reader: `time_unit` stays `""` and
   `max_vus` stays `0`.
@@ -996,8 +1000,8 @@ It reports, in this order:
    written, so a reference in one is not refused.
 3. **Setup and teardown.** Each `run_once` and each `teardown` scenario,
    at that flag.
-4. **Arrival rate on several nodes.** A `load` object when `nodes` is more
-   than 1, at `load`.
+
+No current refusal depends on `nodes`; it is kept for callers.
 
 Paths name keys the way `Parse` does: `headers.Accept`, or
 `headers["X Y"]` for a key that is not letters, digits, `_` and `-`, cut

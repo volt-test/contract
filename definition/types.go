@@ -67,7 +67,7 @@ type Definition struct {
 	// Scenarios that virtual users run, picked at random by weight. A
 	// run_once or teardown scenario is never picked; it runs once.
 	Scenarios []Scenario `json:"scenarios" jsonschema:"required,minItems=1"`
-	// Share of the virtual users per cloud region.
+	// Percent of the virtual users per VoltTest Cloud region.
 	RegionConfig []RegionWeight `json:"region_config,omitempty" contract:"loose"`
 	// Pass/fail rules for the whole test, e.g. "p95 < 500ms" or
 	// "error_rate < 1%".
@@ -249,11 +249,11 @@ type RateStage struct {
 	Target int `json:"target,omitempty" jsonschema:"minimum=0"`
 }
 
-// RegionWeight is one region's share of the load.
+// RegionWeight is one region's percent of the load.
 type RegionWeight struct {
-	// Cloud region name.
+	// VoltTest Cloud region code, e.g. us-east-1.
 	Region string `json:"region" jsonschema:"required,pattern=\\S"`
-	// Relative share of the virtual users.
+	// Percent of the virtual users; on VoltTest Cloud the weights sum to 100.
 	Weight int `json:"weight,omitempty" jsonschema:"minimum=0"`
 }
 

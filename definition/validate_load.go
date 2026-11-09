@@ -18,6 +18,10 @@ const (
 
 var loadTypes = []string{string(LoadRate), string(LoadRampingRate)}
 
+// rampingZeroMessage refuses a ramping_rate load whose every stage target
+// is 0.
+const rampingZeroMessage = "never exceeds a rate of 0, so the run would do nothing; set a stage target above 0"
+
 // validateLoad checks d.Load, which is non-nil.
 func validateLoad(ps *problems, d *Definition) {
 	var others []string
@@ -81,6 +85,7 @@ func validateLoad(ps *problems, d *Definition) {
 		if len(l.Stages) == 0 {
 			ps.add("load.stages", "is required for type ramping_rate (at least one stage)")
 		}
+		allZero := len(l.Stages) > 0
 		for i, s := range l.Stages {
 			p := "load.stages[" + strconv.Itoa(i) + "]"
 			if s.Duration == "" {
@@ -89,6 +94,13 @@ func validateLoad(ps *problems, d *Definition) {
 				ps.positiveDuration(p+".duration", s.Duration, "")
 			}
 			ps.nonNegative(p+".target", s.Target)
+			if s.Target != 0 {
+				allZero = false
+			}
+		}
+		// A negative target is reported on its own above, not here.
+		if allZero {
+			ps.add("load", rampingZeroMessage)
 		}
 	}
 }
