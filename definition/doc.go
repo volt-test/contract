@@ -240,10 +240,11 @@
 // zero, and so must every stage duration.
 //
 // Load is an arrival-rate (open) model. Type LoadRate needs rate and
-// duration; LoadRampingRate needs stages and takes neither. Rates count
-// iterations per time_unit; "" means 1s. preallocated_vus is required, and
-// max_vus 0 means preallocated_vus. Parse leaves both defaults to the
-// reader. load joined schema_version "2.0" while it is a preview.
+// duration; LoadRampingRate needs stages, at least one with a target above
+// 0, and takes neither. Rates count iterations per time_unit; "" means 1s.
+// preallocated_vus is required, and max_vus 0 means preallocated_vus. Parse
+// leaves both defaults to the reader. load joined schema_version "2.0"
+// while it is a preview.
 //
 // # Setup and teardown (v2)
 //
@@ -320,7 +321,7 @@
 //
 // CloudProblems lists what VoltTest Cloud refuses in a definition Parse
 // accepts, for a run on a given number of nodes: tls file paths, ${env.*}
-// references, run_once and teardown scenarios, and a load object on more
-// than one node, in that order. It returns nil for v1. The README section
-// "VoltTest Cloud" gives the paths and messages.
+// references, and run_once and teardown scenarios, in that order. It
+// returns nil for v1. The README section "VoltTest Cloud" gives the paths
+// and messages.
 package definition

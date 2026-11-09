@@ -12,7 +12,6 @@ const (
 	cloudPathMessage  = "must be inline PEM on VoltTest Cloud (a file path cannot be read on a cloud node)"
 	cloudEnvMessage   = " is not available on VoltTest Cloud"
 	cloudSetupMessage = " scenarios are not supported on VoltTest Cloud yet; run them with the headless engine"
-	cloudRateMessage  = "a rate load is not supported on more than one node on VoltTest Cloud yet"
 )
 
 // CloudProblems reports what VoltTest Cloud refuses in a parsed v2
@@ -24,8 +23,9 @@ const (
 //     target.base_url, then per step the request url, body, each body_json
 //     string value, each fields value and each header (sorted by name).
 //     Keys and field names are sent as written, so they are not scanned;
-//   - each run_once and each teardown scenario;
-//   - a load (arrival-rate) object when nodes is more than 1.
+//   - each run_once and each teardown scenario.
+//
+// No current refusal depends on nodes; it is kept for callers.
 //
 // It returns nil for a nil or v1 definition. The result is not capped;
 // callers that build a ValidationError bound it.
@@ -54,9 +54,6 @@ func CloudProblems(d *Definition, nodes int) []Problem {
 		if sc.Teardown {
 			ps = append(ps, Problem{Path: sp + ".teardown", Message: "teardown" + cloudSetupMessage})
 		}
-	}
-	if d.Load != nil && nodes > 1 {
-		ps = append(ps, Problem{Path: "load", Message: cloudRateMessage})
 	}
 	return ps
 }

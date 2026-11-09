@@ -13,11 +13,11 @@
   },
   "region_config": [
     {
-      "region": "us-east",
+      "region": "us-east-1",
       "weight": 70
     },
     {
-      "region": "eu-west",
+      "region": "eu-west-1",
       "weight": 30
     }
   ],

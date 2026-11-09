@@ -402,6 +402,16 @@
               "maxLength": 0
             },
             "stages": {
+              "contains": {
+                "properties": {
+                  "target": {
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "target"
+                ]
+              },
               "minItems": 1
             }
           },
@@ -483,12 +493,12 @@
         "region": {
           "type": "string",
           "pattern": "\\S",
-          "description": "Cloud region name."
+          "description": "VoltTest Cloud region code, e.g. us-east-1."
         },
         "weight": {
           "type": "integer",
           "minimum": 0,
-          "description": "Relative share of the virtual users."
+          "description": "Percent of the virtual users; on VoltTest Cloud the weights sum to 100."
         }
       },
       "additionalProperties": false,
@@ -496,7 +506,7 @@
       "required": [
         "region"
       ],
-      "description": "One cloud region's share of the virtual users."
+      "description": "One VoltTest Cloud region and its percent of the virtual users."
     },
     "Request": {
       "dependentSchemas": {
@@ -1111,7 +1121,7 @@
         "$ref": "#/$defs/RegionWeight"
       },
       "type": "array",
-      "description": "Share of the virtual users per cloud region."
+      "description": "Percent of the virtual users per VoltTest Cloud region."
     },
     "thresholds": {
       "items": {
