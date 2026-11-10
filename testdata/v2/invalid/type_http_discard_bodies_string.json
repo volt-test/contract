@@ -1,0 +1,23 @@
+{
+  "schema_version": "2.0",
+  "name": "discard_bodies that is a string",
+  "virtual_users": 1,
+  "duration": "10s",
+  "http": {
+    "discard_bodies": "yes"
+  },
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Send",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/api"
+          }
+        }
+      ]
+    }
+  ]
+}

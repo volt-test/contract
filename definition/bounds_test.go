@@ -224,3 +224,27 @@ func TestDeeplyNestedExpected(t *testing.T) {
 		})
 	}
 }
+
+// A v2 header array with many bad elements builds a path only for the
+// problems that are kept.
+func TestHeaderValueProblemsBounded(t *testing.T) {
+	n := sized(100_000)
+	doc := `{"schema_version":"2.0","name":"x","virtual_users":1,"scenarios":[{"name":"a","steps":[{"name":"b",` +
+		`"request":{"method":"GET","url":"https://example.com/","headers":{"X":[` +
+		strings.TrimSuffix(strings.Repeat(`1,`, n), ",") + `]}}}]}]}`
+	var err error
+	elapsed, alloc, mallocs := measure(func() { _, err = definition.Parse([]byte(doc)) })
+	t.Logf("%d bad header values: %v, %d KB in %d allocations", n, elapsed, alloc>>10, mallocs)
+	var ve *definition.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("error = %v", err)
+	}
+	const path = "scenarios[0].steps[0].request.headers.X[0]"
+	if len(ve.Problems) != definition.MaxKeptForTest || ve.Omitted != n-definition.MaxKeptForTest ||
+		ve.Problems[0] != (definition.Problem{Path: path, Message: "must be a string"}) {
+		t.Errorf("kept %d (first %v), omitted %d", len(ve.Problems), ve.Problems[0], ve.Omitted)
+	}
+	if mallocs > 5_000 {
+		t.Errorf("%d allocations for %d bad values", mallocs, n)
+	}
+}

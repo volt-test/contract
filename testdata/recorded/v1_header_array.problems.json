@@ -1,0 +1,7 @@
+[
+  {
+    "Path": "scenarios[0].steps[0].request.headers.Accept",
+    "Message": "must be a string",
+    "Count": 7
+  }
+]

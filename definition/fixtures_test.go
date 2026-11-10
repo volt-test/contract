@@ -17,7 +17,7 @@ const privateKeyType = "PRIVATE " + "KEY"
 // including CSV files embedded as base64 in data_content.
 func TestFixturesCarryNoSecrets(t *testing.T) {
 	csvs := 0
-	for _, dir := range []string{"v1", "v2"} {
+	for _, dir := range []string{"v1", "v2", "recorded"} {
 		for _, f := range fixtures(t, dir) {
 			raw := readFile(t, f)
 			if bytes.Contains(bytes.ToLower(raw), []byte("secret")) {

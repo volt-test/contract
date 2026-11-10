@@ -142,6 +142,10 @@
 // sizes and counts, with the tolerance above for durations. Rates and
 // throughput have no comparison form.
 //
+// ParseSize reads a size alone, with no operator, such as "1mb" or
+// "512kib": the value of a size comparison, returned as an exact whole
+// number of bytes.
+//
 // # No data
 //
 // A threshold has status no_data, with a null actual, when there is

@@ -82,26 +82,31 @@ var v1ReadSet = map[string]string{
 	"scenarios[].steps[].request.headers": "loose",
 	"scenarios[].data_config.data_download_url": "loose",
 
-	"target.base_url":                        "v2",
-	"thresholds":                             "v2",
-	"scenarios[].thresholds":                 "v2",
-	"scenarios[].steps[].thresholds":         "v2",
-	"scenarios[].run_once":                   "v2",
-	"scenarios[].teardown":                   "v2",
-	"scenarios[].steps[].checks":             "v2",
-	"scenarios[].steps[].extract[].required": "v2",
-	"scenarios[].steps[].extract[].on_fail":  "v2",
-	"scenarios[].steps[].extract[].pick":     "v2",
-	"expected_statuses":                      "v2",
-	"http":                                   "v2",
-	"tls":                                    "v2",
-	"scenarios[].steps[].follow_redirects":   "v2",
-	"scenarios[].steps[].max_redirects":      "v2",
-	"scenarios[].steps[].once_per_vu":        "v2",
-	"load":                                   "v2",
-	"scenarios[].steps[].request.body_type":  "v2",
-	"scenarios[].steps[].request.body_json":  "v2",
-	"scenarios[].steps[].request.fields":     "v2",
+	"target.base_url":                         "v2",
+	"thresholds":                              "v2",
+	"scenarios[].thresholds":                  "v2",
+	"scenarios[].steps[].thresholds":          "v2",
+	"scenarios[].run_once":                    "v2",
+	"scenarios[].teardown":                    "v2",
+	"scenarios[].steps[].checks":              "v2",
+	"scenarios[].steps[].extract[].required":  "v2",
+	"scenarios[].steps[].extract[].on_fail":   "v2",
+	"scenarios[].steps[].extract[].pick":      "v2",
+	"expected_statuses":                       "v2",
+	"http":                                    "v2",
+	"tls":                                     "v2",
+	"scenarios[].steps[].follow_redirects":    "v2",
+	"scenarios[].steps[].max_redirects":       "v2",
+	"scenarios[].steps[].once_per_vu":         "v2",
+	"load":                                    "v2",
+	"scenarios[].steps[].request.body_type":   "v2",
+	"scenarios[].steps[].request.body_json":   "v2",
+	"scenarios[].steps[].request.fields":      "v2",
+	"scenarios[].steps[].request.files":       "v2",
+	"scenarios[].steps[].request.body_base64": "v2",
+	"scenarios[].steps[].request.timeout":     "v2",
+	"scenarios[].steps[].discard_body":        "v2",
+	"scenarios[].steps[].response_type":       "v2",
 }
 
 type classified struct {
@@ -183,6 +188,9 @@ func TestV2OnlyFieldsTagged(t *testing.T) {
 // v1Sample builds a v1 document that sets every field the v1 path reads.
 func v1Sample(t reflect.Type) any {
 	t = derefType(t)
+	if t == headerValuesType {
+		return "s" // a header value is a string in v1
+	}
 	switch t.Kind() {
 	case reflect.Struct:
 		m := map[string]any{}
@@ -486,7 +494,7 @@ func toMirror(d *Definition) mirrorDefinition {
 		for j, st := range sc.Steps {
 			r := st.Request
 			ms.Steps[j] = mirrorStep{Name: st.Name, Request: mirrorRequest{Method: r.Method, URL: r.URL,
-				Body: r.Body, Header: r.Header, Headers: r.Headers},
+				Body: r.Body, Header: r.Header, Headers: mirrorHeaders(r.Headers)},
 				Validate: st.Validate, ThinkTime: st.ThinkTime}
 			if st.Extract != nil {
 				ms.Steps[j].Extract = make([]mirrorExtract, len(st.Extract))
@@ -502,6 +510,23 @@ func toMirror(d *Definition) mirrorDefinition {
 		m.Scenarios[i] = ms
 	}
 	return m
+}
+
+// mirrorHeaders turns v1 header values, one per header, into the strings
+// the v1 readers decode.
+func mirrorHeaders(h map[string]HeaderValues) map[string]string {
+	if h == nil {
+		return nil
+	}
+	out := make(map[string]string, len(h))
+	for k, vs := range h {
+		if len(vs) > 0 {
+			out[k] = vs[0]
+		} else {
+			out[k] = ""
+		}
+	}
+	return out
 }
 
 // TestMirrorCoversV1Fields keeps mirrorDefinition in step with the types:
@@ -955,6 +980,83 @@ func TestV1DropsTypedBodyKeys(t *testing.T) {
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s: v1 with typed body keys:\n got %+v\nwant %+v", name, got, want)
+		}
+	}
+}
+
+// TestV1DropsHTTPTier2Keys checks that http_tier2_ignored.json, a v1
+// definition carrying the http body and timeout keys, a step's
+// discard_body and response_type, and a request's timeout, files and
+// body_base64, with values and combinations v2 rejects, parses exactly as
+// it does without them, and so do mistyped values and other spellings of
+// the keys. Its headers stay strings and are read as in v0.3.0.
+func TestV1DropsHTTPTier2Keys(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "testdata", "v1", "cli", "http_tier2_ignored.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stripped := withoutV2OnlyKeys(t, raw)
+	for _, k := range []string{`"http"`, `"discard_body"`, `"response_type"`, `"timeout"`, `"files"`, `"body_base64"`, `"body_type"`, `"fields"`} {
+		if !bytes.Contains(raw, []byte(k)) || bytes.Contains(stripped, []byte(k)) {
+			t.Fatalf("the fixture's %s keys were not removed: %s", k, stripped)
+		}
+	}
+	want, err := Parse(stripped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps := want.Scenarios[0].Steps
+	if len(steps) != 2 || steps[0].Request.Body != `{"email":"user@example.com"}` || steps[1].Request.Body != "raw" ||
+		steps[0].Extract[0].Type != "json" || steps[1].Extract[0].Type != "regex" || want.HTTPTimeout != "5s" ||
+		!reflect.DeepEqual(steps[1].Request.Headers, map[string]HeaderValues{"Content-Type": {"multipart/form-data"}, "Host": {"files.example.com"}}) {
+		t.Fatalf("steps = %+v; the keys next to the dropped ones must still be read", steps)
+	}
+	docs := map[string][]byte{"fixture": raw}
+	for name, keys := range map[string]string{
+		"strings":       `"timeout":5,"files":"a.pdf","body_base64":["AAAA"],`,
+		"null":          `"timeout":null,"files":null,"body_base64":null,`,
+		"mistyped file": `"files":{"doc":{"path":1,"content_base64":[],"filename":{},"content_type":true}},`,
+		"case variants": `"Timeout":"1s","FILES":{"doc":{"path":"a"}},"Body_Base64":"AAAA",`,
+	} {
+		docs["request "+name] = bytes.Replace(stripped, []byte(`"method":"POST"`), []byte(keys+`"method":"POST"`), 1)
+	}
+	for name, keys := range map[string]string{
+		"strings":       `"discard_body":"yes","response_type":1,`,
+		"objects":       `"discard_body":{},"response_type":["binary"],`,
+		"case variants": `"Discard_Body":true,"RESPONSE_TYPE":"binary",`,
+	} {
+		docs["step "+name] = bytes.Replace(stripped, []byte(`"name":"Login"`), []byte(keys+`"name":"Login"`), 1)
+	}
+	for name, http := range map[string]string{
+		"string":        `"x"`,
+		"mistyped keys": `{"max_body_size":5,"discard_bodies":"yes","connect_timeout":[],"tls_handshake_timeout":{},"response_header_timeout":true}`,
+	} {
+		docs["http "+name] = bytes.Replace(stripped, []byte(`"name":`), []byte(`"http":`+http+`,"name":`), 1)
+	}
+	for name, doc := range docs {
+		if bytes.Equal(doc, stripped) {
+			t.Fatalf("%s: nothing was added: %s", name, doc)
+		}
+		got, err := Parse(doc)
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", name, err, doc)
+		}
+		if !got.IsV1() || len(got.V1TypeProblems) != 0 {
+			t.Errorf("%s: IsV1 %v, V1TypeProblems %v", name, got.IsV1(), got.V1TypeProblems)
+		}
+		if got.HTTP != nil {
+			t.Errorf("%s: http kept: %+v", name, got.HTTP)
+		}
+		for _, sc := range got.Scenarios {
+			for _, st := range sc.Steps {
+				r := st.Request
+				if st.DiscardBody != nil || st.ResponseType != "" || r.Timeout != "" || r.Files != nil || r.BodyBase64 != "" {
+					t.Errorf("%s: step %s kept a v2-only key", name, st.Name)
+				}
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: v1 with HTTP tier-2 keys:\n got %+v\nwant %+v", name, got, want)
 		}
 	}
 }

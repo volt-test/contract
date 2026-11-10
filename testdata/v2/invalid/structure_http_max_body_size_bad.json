@@ -1,0 +1,23 @@
+{
+  "schema_version": "2.0",
+  "name": "max_body_size that is not whole bytes",
+  "virtual_users": 1,
+  "duration": "10s",
+  "http": {
+    "max_body_size": "1.5b"
+  },
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Send",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/api"
+          }
+        }
+      ]
+    }
+  ]
+}

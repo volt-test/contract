@@ -88,14 +88,15 @@ type ParseError struct {
 	// Msg describes the problem, often with a hint.
 	Msg string
 
-	// comparison is set for errors from ParseComparison.
-	comparison bool
+	// what is "comparison" for errors from ParseComparison and "size"
+	// for errors from ParseSize; "" means a threshold.
+	what string
 }
 
 func (e *ParseError) Error() string {
-	what := "threshold"
-	if e.comparison {
-		what = "comparison"
+	what := e.what
+	if what == "" {
+		what = "threshold"
 	}
 	return fmt.Sprintf("thresholds: invalid %s %s: %s (at offset %d)", what, quoteShort(e.Expr), e.Msg, e.Pos)
 }
@@ -176,7 +177,7 @@ func ParseComparison(k Kind, s string) (Comparison, error) {
 	default:
 		return Comparison{}, fmt.Errorf("thresholds: a comparison is a duration, size or count, not %s", k)
 	}
-	p := parser{s: s, bare: true}
+	p := parser{s: s, what: "comparison"}
 	p.skipSpace()
 	if p.i == len(p.s) {
 		return Comparison{}, p.fail(p.i, "the comparison is empty; write <operator> <value>, e.g. %q", example)
@@ -186,6 +187,37 @@ func ParseComparison(k Kind, s string) (Comparison, error) {
 		return Comparison{}, err
 	}
 	return Comparison{Raw: s, Kind: k, Op: op, Value: v}, nil
+}
+
+// ParseSize parses a size such as "1mb", "512kib" or "1048576": a number
+// and a unit, with the units and rules of a size threshold value, and no
+// operator. It returns the size in bytes, exactly. Errors are *ParseError.
+func ParseSize(s string) (uint64, error) {
+	p := parser{s: s, what: "size"}
+	p.skipSpace()
+	if p.i == len(p.s) {
+		return 0, p.fail(p.i, "the size is empty; write a number and a unit, e.g. %q", "1mb")
+	}
+	a, err := p.amount("")
+	if err != nil {
+		return 0, err
+	}
+	if _, msg, atUnit := value(KindSize, "the value", a.number, a.unit, a.whole); msg != "" {
+		pos := a.valPos
+		if atUnit {
+			pos = a.unitPos
+		}
+		return 0, p.fail(pos, "%s", msg)
+	}
+	// value accepted the unit, so it is ASCII and known.
+	u, _ := normalizeUnit(a.unit)
+	exp, pow2, _ := sizeScale(u)
+	digits, _ := wholeBytes(a.number, exp, pow2)
+	n, err := strconv.ParseUint(digits, 10, 64)
+	if err != nil {
+		return 0, p.fail(a.valPos, "the value is too large")
+	}
+	return n, nil
 }
 
 // Holds reports whether a measured value, in the canonical unit of c's
@@ -200,13 +232,13 @@ func (c Comparison) Holds(actual float64) bool {
 type parser struct {
 	s string
 	i int
-	// bare is set when parsing a comparison without a metric, for error
-	// text.
-	bare bool
+	// what names the input in errors: "comparison" for a comparison
+	// without a metric, "size" for a size; "" for a threshold.
+	what string
 }
 
 func (p *parser) fail(pos int, format string, args ...any) error {
-	return &ParseError{Expr: p.s, Pos: pos, Msg: fmt.Sprintf(format, args...), comparison: p.bare}
+	return &ParseError{Expr: p.s, Pos: pos, Msg: fmt.Sprintf(format, args...), what: p.what}
 }
 
 func (p *parser) skipSpace() {
@@ -280,21 +312,53 @@ func (p *parser) comparison(k Kind, metric string) (Op, float64, error) {
 		return 0, 0, p.fail(opPos, "expected an operator (%s)%s, got %q", opList, afterMetric(metric), p.next())
 	}
 
-	// Value: digits, an optional fraction and an optional unit.
+	a, err := p.amount(op.String())
+	if err != nil {
+		return 0, 0, err
+	}
+	subject := metric
+	if subject == "" {
+		subject = "the value"
+	}
+	v, msg, atUnit := value(k, subject, a.number, a.unit, a.whole)
+	if msg != "" {
+		pos := a.valPos
+		if atUnit {
+			pos = a.unitPos
+		}
+		return 0, 0, p.fail(pos, "%s", msg)
+	}
+	return op, v, nil
+}
+
+// amount is a number and its unit as written, with their offsets.
+type amount struct {
+	number, unit    string
+	valPos, unitPos int
+	// whole is false when the number has a non-zero fraction digit.
+	whole bool
+}
+
+// amount reads a value (digits, an optional fraction and an optional
+// unit) that must run to the end of the input. after is the operator
+// before it, for messages; "" when there is none.
+func (p *parser) amount(after string) (amount, error) {
 	p.skipSpace()
 	valPos := p.i
 	if p.i == len(p.s) {
-		return 0, 0, p.fail(valPos, "missing value after %q", op.String())
+		return amount{}, p.fail(valPos, "missing value after %q", after)
 	}
 	switch c := p.s[p.i]; {
 	case c == '-':
-		return 0, 0, p.fail(valPos, "the value must not be negative")
+		return amount{}, p.fail(valPos, "the value must not be negative")
 	case c == '+':
-		return 0, 0, p.fail(valPos, `remove the "+" sign; values are never negative`)
+		return amount{}, p.fail(valPos, `remove the "+" sign; values are never negative`)
 	case c == '.':
-		return 0, 0, p.fail(valPos, `write a digit before the decimal point, e.g. "0.5"`)
+		return amount{}, p.fail(valPos, `write a digit before the decimal point, e.g. "0.5"`)
+	case !isDigit(c) && after == "":
+		return amount{}, p.fail(valPos, "expected a number, got %q", p.next())
 	case !isDigit(c):
-		return 0, 0, p.fail(valPos, "expected a number after %q, got %q", op.String(), p.next())
+		return amount{}, p.fail(valPos, "expected a number after %q, got %q", after, p.next())
 	}
 	for p.i < len(p.s) && isDigit(p.s[p.i]) {
 		p.i++
@@ -303,7 +367,7 @@ func (p *parser) comparison(k Kind, metric string) (Op, float64, error) {
 	if p.i < len(p.s) && p.s[p.i] == '.' {
 		p.i++
 		if p.i == len(p.s) || !isDigit(p.s[p.i]) {
-			return 0, 0, p.fail(p.i-1, "a decimal point must be followed by digits")
+			return amount{}, p.fail(p.i-1, "a decimal point must be followed by digits")
 		}
 		for p.i < len(p.s) && isDigit(p.s[p.i]) {
 			if p.s[p.i] != '0' {
@@ -316,11 +380,11 @@ func (p *parser) comparison(k Kind, metric string) (Op, float64, error) {
 	if p.i < len(p.s) {
 		c := p.s[p.i]
 		if c == '.' {
-			return 0, 0, p.fail(p.i, "a number has at most one decimal point")
+			return amount{}, p.fail(p.i, "a number has at most one decimal point")
 		}
 		if (c == 'e' || c == 'E') && p.i+1 < len(p.s) {
 			if d := p.s[p.i+1]; isDigit(d) || d == '+' || d == '-' {
-				return 0, 0, p.fail(p.i, "exponents are not supported; write the number out in full")
+				return amount{}, p.fail(p.i, "exponents are not supported; write the number out in full")
 			}
 		}
 	}
@@ -337,24 +401,11 @@ func (p *parser) comparison(k Kind, metric string) (Op, float64, error) {
 	if p.i < len(p.s) {
 		r, _ := utf8.DecodeRuneInString(p.s[p.i:])
 		if unit == "" && unitPos < p.i && (r == '%' || unicode.IsLetter(r)) {
-			return 0, 0, p.fail(unitPos, "remove the space between the number and its unit")
+			return amount{}, p.fail(unitPos, "remove the space between the number and its unit")
 		}
-		return 0, 0, p.fail(p.i, "unexpected %q after the value", string(r))
+		return amount{}, p.fail(p.i, "unexpected %q after the value", string(r))
 	}
-
-	subject := metric
-	if subject == "" {
-		subject = "the value"
-	}
-	v, msg, atUnit := value(k, subject, number, unit, whole)
-	if msg != "" {
-		pos := valPos
-		if atUnit {
-			pos = unitPos
-		}
-		return 0, 0, p.fail(pos, "%s", msg)
-	}
-	return op, v, nil
+	return amount{number: number, unit: unit, valPos: valPos, unitPos: unitPos, whole: whole}, nil
 }
 
 // afterMetric is " after <metric>" for operator messages, or "" with no
@@ -499,29 +550,16 @@ func value(k Kind, subject, number, unit string, whole bool) (v float64, msg str
 		// Wholeness is decided exactly from the literal, before any float
 		// rounding: the decimal point is moved as text for the x1000 units,
 		// and the x1024 units are multiplied as exact rationals.
-		var exp int
-		var pow2 uint
-		switch u {
-		case "", "b":
+		exp, pow2, ok := sizeScale(u)
+		switch {
+		case !ok:
+			return badUnit("%s is a size; use b, kb, mb, gb, kib, mib or gib (or a plain number of bytes), not %s")
+		case exp == 0 && pow2 == 0:
 			// Unscaled: the literal itself must be whole, as for counts.
 			if !whole {
 				return 0, fmt.Sprintf("%s is a size; use a whole number of bytes", subject), false
 			}
 			return scale(0, 1)
-		case "kb":
-			exp = 3
-		case "mb":
-			exp = 6
-		case "gb":
-			exp = 9
-		case "kib":
-			pow2 = 10
-		case "mib":
-			pow2 = 20
-		case "gib":
-			pow2 = 30
-		default:
-			return badUnit("%s is a size; use b, kb, mb, gb, kib, mib or gib (or a plain number of bytes), not %s")
 		}
 		if bytes, ok := wholeBytes(number, exp, pow2); !ok {
 			return 0, fmt.Sprintf("%s is a size; use a whole number of bytes (%s is %s bytes)",
@@ -533,6 +571,29 @@ func value(k Kind, subject, number, unit string, whole bool) (v float64, msg str
 		return scale(exp, 1)
 	}
 	return 0, "unknown metric kind", false
+}
+
+// sizeScale returns the scale of a size unit (normalized): a power of ten
+// for kb, mb and gb, a power of two for kib, mib and gib, neither for b or
+// no unit. ok is false for any other unit.
+func sizeScale(u string) (exp int, pow2 uint, ok bool) {
+	switch u {
+	case "", "b":
+		return 0, 0, true
+	case "kb":
+		return 3, 0, true
+	case "mb":
+		return 6, 0, true
+	case "gb":
+		return 9, 0, true
+	case "kib":
+		return 0, 10, true
+	case "mib":
+		return 0, 20, true
+	case "gib":
+		return 0, 30, true
+	}
+	return 0, 0, false
 }
 
 // wholeBytes computes number x 10^exp x 2^pow2 exactly and reports whether

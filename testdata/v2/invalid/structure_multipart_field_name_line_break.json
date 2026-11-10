@@ -1,0 +1,24 @@
+{
+  "schema_version": "2.0",
+  "name": "Multipart field name with a line break",
+  "virtual_users": 1,
+  "duration": "10s",
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Send",
+          "request": {
+            "method": "POST",
+            "url": "https://shop.example.com/api",
+            "body_type": "multipart",
+            "fields": {
+              "title\r\nX-Injected: 1": "Report"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

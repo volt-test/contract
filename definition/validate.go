@@ -18,7 +18,7 @@ var (
 	failModes = []string{string(FailRecord), string(FailFail), string(FailAbort)}
 	picks     = []string{string(PickRandom), string(PickFirst), string(PickLast), string(PickAll)}
 	jsonKinds = []string{"array", "object", "string", "number", "bool", "null"}
-	bodyTypes = []string{string(BodyTypeRaw), string(BodyTypeJSON), string(BodyTypeForm)}
+	bodyTypes = []string{string(BodyTypeRaw), string(BodyTypeJSON), string(BodyTypeForm), string(BodyTypeMultipart)}
 )
 
 // validateV2 checks the structure of a decoded v2 definition. objectForms
@@ -99,6 +99,7 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 		ps.add("scenarios", "must have at least one scenario")
 	}
 	globals := setupGlobals(d.Scenarios)
+	var inline inlineBudget
 	scenarioNames := map[string]int{}
 	for i, sc := range d.Scenarios {
 		p := "scenarios[" + strconv.Itoa(i) + "]"
@@ -124,6 +125,7 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 				ps.add(sp+".request.url", msg)
 			}
 			validateRequestBody(&ps, sp+".request", st.Request)
+			validateRequestRules(&ps, sp+".request", st.Request, &inline)
 			for k, ex := range st.Extract {
 				ep := sp + ".extract[" + strconv.Itoa(k) + "]"
 				if strings.TrimSpace(ex.VariableName) == "" {
@@ -157,6 +159,7 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 			}
 			checkLabels(&ps, sp, st)
 			validateStepRedirects(&ps, sp, st, follows)
+			validateResponseReading(&ps, sp, st)
 			validateOncePerVU(&ps, sp, sc, st)
 		}
 		if sc.IsLoad() && len(sc.Steps) > 0 && allOncePerVU(sc.Steps) {
@@ -171,16 +174,17 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 }
 
 // validateRequestBody applies the body_type rules to the request at rp:
-// body goes with body_type raw, body_json with json (which requires it)
-// and fields with form. Zero values ("", {}) read as absent. With an
-// unknown body_type only body_type is reported.
+// body and body_base64 (not both) go with body_type raw, body_json with
+// json (which requires it), fields with form or multipart, and files with
+// multipart, which needs fields or files. Zero values ("", {}) read as
+// absent. With an unknown body_type only body_type is reported.
 func validateRequestBody(ps *problems, rp string, r Request) {
 	if r.BodyType != "" {
 		ps.oneOf(rp+".body_type", string(r.BodyType), bodyTypes)
 	}
 	kind := r.BodyKind()
 	switch kind {
-	case BodyTypeRaw, BodyTypeJSON, BodyTypeForm:
+	case BodyTypeRaw, BodyTypeJSON, BodyTypeForm, BodyTypeMultipart:
 	default:
 		return
 	}
@@ -193,8 +197,21 @@ func validateRequestBody(ps *problems, rp string, r Request) {
 	case len(r.BodyJSON) == 0 && kind == BodyTypeJSON:
 		ps.add(rp+".body_json", `is required with body_type "json"`)
 	}
-	if len(r.Fields) > 0 && kind != BodyTypeForm {
-		ps.add(rp+".fields", `only applies with body_type "form"`)
+	if len(r.Fields) > 0 && kind != BodyTypeForm && kind != BodyTypeMultipart {
+		ps.add(rp+".fields", `only applies with body_type "form" or "multipart"`)
+	}
+	switch {
+	case len(r.Files) > 0 && kind != BodyTypeMultipart:
+		ps.add(rp+".files", `only applies with body_type "multipart"`)
+	case len(r.Files) == 0 && len(r.Fields) == 0 && kind == BodyTypeMultipart:
+		ps.add(rp+".body_type", `"multipart" needs fields or files`)
+	}
+	switch {
+	case r.BodyBase64 == "":
+	case kind != BodyTypeRaw:
+		ps.add(rp+".body_base64", `only applies with body_type "raw"`)
+	case r.Body != "":
+		ps.add(rp+".body_base64", "cannot be combined with body; use one of them")
 	}
 }
 
@@ -205,6 +222,8 @@ func bodyKey(kind BodyType) string {
 		return "body_json"
 	case BodyTypeForm:
 		return "fields"
+	case BodyTypeMultipart:
+		return "fields and files"
 	}
 	return "body"
 }

@@ -32,6 +32,14 @@ var httpTLSFixtureProblems = map[string]string{
 	"type_tls_insecure_skip_verify_string.json":      `tls.insecure_skip_verify: must be true or false`,
 	"type_tls_client_key_number.json":                `tls.client_key: must be a string`,
 	"type_step_follow_redirects_null.json":           `scenarios[0].steps[0].follow_redirects: must not be null`,
+
+	"structure_http_max_body_size_bad.json":              `http.max_body_size: invalid size "1.5b": the value is a size; use a whole number of bytes (at offset 0)`,
+	"structure_http_max_body_size_zero.json":             `http.max_body_size: must be greater than zero; to drop every body, set discard_bodies: true`,
+	"structure_http_max_body_size_too_big.json":          `http.max_body_size: must be at most 1gib (1073741824 bytes)`,
+	"structure_http_connect_timeout_zero.json":           `http.connect_timeout: must be greater than zero`,
+	"structure_http_tls_handshake_timeout_negative.json": `http.tls_handshake_timeout: must be greater than zero`,
+	"structure_http_response_header_timeout_bad.json":    `http.response_header_timeout: must be a duration such as "30s" or "1m30s", got "soon"`,
+	"type_http_discard_bodies_string.json":               `http.discard_bodies: must be true or false`,
 }
 
 const (

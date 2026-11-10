@@ -9,9 +9,10 @@ import (
 )
 
 const (
-	cloudPathMessage  = "must be inline PEM on VoltTest Cloud (a file path cannot be read on a cloud node)"
-	cloudEnvMessage   = " is not available on VoltTest Cloud"
-	cloudSetupMessage = " scenarios are not supported on VoltTest Cloud yet; run them with the headless engine"
+	cloudPathMessage   = "must be inline PEM on VoltTest Cloud (a file path cannot be read on a cloud node)"
+	cloudEnvMessage    = " is not available on VoltTest Cloud"
+	cloudSetupMessage  = " scenarios are not supported on VoltTest Cloud yet; run them with the headless engine"
+	cloudBinaryMessage = "is not available on VoltTest Cloud yet; run this test headless"
 )
 
 // CloudProblems reports what VoltTest Cloud refuses in a parsed v2
@@ -19,9 +20,13 @@ const (
 //
 //   - a tls client_cert, client_key or ca_cert that is a file path, not
 //     inline PEM;
+//   - binary request content, per step: the request body_base64, then each
+//     multipart file's path or content_base64, by field name. Cloud
+//     nodes cannot receive file content yet;
 //   - each distinct ${env.*} reference at each path where it is written:
 //     target.base_url, then per step the request url, body, each body_json
-//     string value, each fields value and each header (sorted by name).
+//     string value, each fields value, each multipart file's filename (by
+//     field name) and each header (sorted by name).
 //     Keys and field names are sent as written, so they are not scanned;
 //   - each run_once and each teardown scenario.
 //
@@ -42,6 +47,24 @@ func CloudProblems(d *Definition, nodes int) []Problem {
 		} {
 			if f.v != "" && !IsInlinePEM(f.v) {
 				ps = append(ps, Problem{Path: f.path, Message: cloudPathMessage})
+			}
+		}
+	}
+	for i, sc := range d.Scenarios {
+		for j, st := range sc.Steps {
+			rp := indexPath(indexPath("scenarios", i)+".steps", j) + ".request"
+			r := st.Request
+			if r.BodyBase64 != "" {
+				ps = append(ps, Problem{Path: rp + ".body_base64", Message: cloudBinaryMessage})
+			}
+			for _, name := range slices.Sorted(maps.Keys(r.Files)) {
+				fp, f := joinPath(rp+".files", name), r.Files[name]
+				if f.Path != "" {
+					ps = append(ps, Problem{Path: fp + ".path", Message: cloudBinaryMessage})
+				}
+				if f.ContentBase64 != "" {
+					ps = append(ps, Problem{Path: fp + ".content_base64", Message: cloudBinaryMessage})
+				}
 			}
 		}
 	}
@@ -77,8 +100,20 @@ func cloudEnvProblems(ps []Problem, d *Definition) []Problem {
 			for _, f := range r.Fields {
 				ps = appendEnvRefs(ps, joinPath(rp+".fields", f.Name), f.Value)
 			}
+			for _, name := range slices.Sorted(maps.Keys(r.Files)) {
+				ps = appendEnvRefs(ps, joinPath(rp+".files", name)+".filename", r.Files[name].Filename)
+			}
 			for _, name := range slices.Sorted(maps.Keys(r.Headers)) {
-				ps = appendEnvRefs(ps, joinPath(rp+".headers", name), r.Headers[name])
+				// One value is reported at the header, as it marshals;
+				// several at their index.
+				hp, vs := joinPath(rp+".headers", name), r.Headers[name]
+				if len(vs) == 1 {
+					ps = appendEnvRefs(ps, hp, vs[0])
+					continue
+				}
+				for k, v := range vs {
+					ps = appendEnvRefs(ps, indexPath(hp, k), v)
+				}
 			}
 		}
 	}

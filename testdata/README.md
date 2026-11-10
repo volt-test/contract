@@ -43,6 +43,14 @@ the v1 engines read and loses nothing on a round trip.
   `body_json` and `fields` without their `body_type`);
   `TestV1DropsTypedBodyKeys` checks it, and the keys with the wrong JSON
   type, a repeated field name, and other cases.
+  `http_tier2_ignored.json` does the same for the `http` body and timeout
+  keys, a step's `discard_body` and `response_type`, and a request's
+  `timeout`, `files` and `body_base64`, with values and combinations v2
+  rejects (a fractional `max_body_size`, zero and negative timeouts, a
+  file with both sources, `discard_body` next to a `json` extractor),
+  next to string `Host` and `Content-Type` headers that v1 keeps;
+  `TestV1DropsHTTPTier2Keys` checks it, and the keys with the wrong JSON
+  type and other cases.
 
 Every `*_ignored.json` fixture keeps the right JSON type for each value:
 `TestV1RewriteMatchesDirectDecode` decodes every v1 fixture with plain
@@ -115,6 +123,23 @@ one, contains "secret".
   a form without `fields`, one with `fields: {}`, and a request with
   every body key at its zero value. The other accepted cases are in
   `TestBodyRules` in `definition/body_test.go`.
+  `http_tier2.json` has every new `http` key, a request to an IP with a
+  `Host` header, headers given as arrays of two and three values (one of
+  them repeated), a request `timeout`, a `discard_body` step with the
+  checks and extractors that do not read the body, a `binary` step with a
+  `body` check and a `regex` extractor, and an explicit `text` step with
+  `json` readers. A header written as a one-element array is written back
+  as a string, so that case is in Go tests (`TestHeaderValuesRoundTrip`),
+  not in a fixture `TestV2RoundTrip` compares leaf by leaf.
+  `multipart.json` has a multipart request with fields and two files, one
+  by path with a substituted file name and one as base64, and a `raw`
+  request with `body_base64`. `cloud_multipart_path.json`,
+  `cloud_multipart_content.json` and `cloud_body_base64.json` each hold
+  one value VoltTest Cloud refuses, and `cloud_multipart_fields.json` a
+  multipart body with fields only, which it allows;
+  `TestCloudProblemsInlineBinary` in `definition/cloud_test.go` checks
+  them. The other accepted and rejected cases are in
+  `definition/http_tier2_test.go`.
 - `invalid/`: definitions `Parse` rejects, run through the schema as well.
   - `unknown_*`: unknown or v1-only keys added to a valid definition. The
     expected paths are listed in `definition/parse_v2_test.go`.
@@ -187,8 +212,43 @@ one, contains "secret".
     `raw`, a field name used twice (written once as an escape), and
     values of the wrong JSON type (a string `body_json`, a number
     `body_type`, an array `fields`, a number field value).
+  - Headers, multipart and binary bodies, response reading and the request
+    timeout have the families `structure_headers_*`, `type_headers_*`,
+    `structure_multipart_*`, `structure_files_*`, `type_files_*`,
+    `structure_binary_*` (`body_base64`), `structure_discard_body_*`,
+    `type_discard_body_*`, `structure_response_type_*`,
+    `type_response_type_*`, `structure_request_*` and `type_request_*`:
+    `tier2FixtureProblems` in `definition/http_tier2_test.go` lists the
+    problems each must produce, and the test fails on an unlisted fixture
+    of these families. The new `http` keys (`max_body_size`,
+    `discard_bodies` and the timeouts) are `structure_http_*` and
+    `type_http_*` fixtures, listed in `httpTLSFixtureProblems`.
+    `unknown_file_part.json` (an unknown key in a file) and
+    `unknown_step_timeout.json` (`timeout` belongs on the request) are
+    `unknown_*` fixtures. The 10 MiB base64 cap is checked by
+    `TestInlineBinaryCap`, not by a fixture.
   The schema rejects all of them except the cases listed, with reasons, in
   `knownSchemaLooser` in `definition/schema_test.go`.
+
+## Recorded output
+
+`recorded/` holds output written by the v0.3.0 code, before header values
+could be arrays, so that later type changes can be checked against it:
+
+- `marshal/` mirrors `v1/` and `v2/valid/`: the bytes `json.Marshal`
+  writes for each fixture after `Parse`. `TestMarshalUnchanged` in
+  `definition/marshal_test.go` fails if any of them changes, and if a v1
+  fixture has no recording (older code reads every v1 fixture). v2
+  fixtures added later have none; `TestV2RoundTrip` covers them.
+- `v1_header_array.json` is a v1 definition whose header values are
+  arrays, an empty array, numbers, an object, `true` and `null`, next to
+  string values. `v1_header_array.problems.json` and
+  `v1_header_array.marshal.json` are its `V1TypeProblems` and its
+  `json.Marshal` output. `TestV1HeaderArrayStaysTypeProblem` compares
+  against them.
+
+Re-record (`go test ./definition -run 'TestMarshalUnchanged|TestV1HeaderArray' -update-recorded`)
+only for an intended change, and say so in the pull request.
 
 ## Private keys
 

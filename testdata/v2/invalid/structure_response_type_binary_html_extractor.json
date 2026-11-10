@@ -1,0 +1,28 @@
+{
+  "schema_version": "2.0",
+  "name": "Binary step with an html extractor",
+  "virtual_users": 1,
+  "duration": "10s",
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Send",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/api"
+          },
+          "response_type": "binary",
+          "extract": [
+            {
+              "variable_name": "title",
+              "selector": "h1",
+              "type": "html"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

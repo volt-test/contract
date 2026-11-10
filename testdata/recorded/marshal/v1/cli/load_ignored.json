@@ -1,0 +1,1 @@
+{"name":"v1 definition with a load key","virtual_users":2,"duration":"10s","ramp_up":"2s","scenarios":[{"name":"Read","weight":1,"steps":[{"name":"Items","request":{"method":"GET","url":"https://api.example.com/items"}}]}]}

@@ -1,0 +1,46 @@
+{
+  "schema_version": "2.0",
+  "name": "Multipart and binary request bodies",
+  "virtual_users": 1,
+  "duration": "30s",
+  "scenarios": [
+    {
+      "name": "Upload",
+      "steps": [
+        {
+          "name": "Upload report",
+          "request": {
+            "method": "POST",
+            "url": "https://shop.example.com/api/reports",
+            "body_type": "multipart",
+            "fields": {
+              "title": "Report ${uuid}",
+              "tags": "a,b"
+            },
+            "files": {
+              "report": {
+                "path": "fixtures/report.pdf",
+                "filename": "report-${vu_id}.pdf",
+                "content_type": "application/pdf"
+              },
+              "avatar": {
+                "content_base64": "iVBORw0KGgo=",
+                "content_type": "image/png"
+              }
+            }
+          },
+          "checks": [{"type": "status", "in": [201]}]
+        },
+        {
+          "name": "Send bytes",
+          "request": {
+            "method": "PUT",
+            "url": "https://shop.example.com/api/blob",
+            "headers": {"Content-Type": "application/octet-stream"},
+            "body_base64": "AAECAwQ="
+          }
+        }
+      ]
+    }
+  ]
+}

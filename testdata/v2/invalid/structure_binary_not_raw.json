@@ -1,0 +1,23 @@
+{
+  "schema_version": "2.0",
+  "name": "body_base64 with body_type json",
+  "virtual_users": 1,
+  "duration": "10s",
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Send",
+          "request": {
+            "method": "POST",
+            "url": "https://shop.example.com/api",
+            "body_type": "json",
+            "body_json": {},
+            "body_base64": "AAAA"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -26,7 +26,9 @@ func v2OnlyDropped(path string) bool {
 		"expected_statuses[]", "scenarios[].steps[].checks", "scenarios[].steps[].extract[].required",
 		"scenarios[].steps[].extract[].on_fail", "scenarios[].steps[].extract[].pick", "http", "tls", "scenarios[].steps[].follow_redirects",
 		"scenarios[].steps[].max_redirects", "scenarios[].steps[].once_per_vu", "load",
-		"scenarios[].steps[].request.body_type", "scenarios[].steps[].request.body_json", "scenarios[].steps[].request.fields"} {
+		"scenarios[].steps[].request.body_type", "scenarios[].steps[].request.body_json", "scenarios[].steps[].request.fields",
+		"scenarios[].steps[].request.files", "scenarios[].steps[].request.body_base64", "scenarios[].steps[].request.timeout",
+		"scenarios[].steps[].discard_body", "scenarios[].steps[].response_type"} {
 		if p == prefix || strings.HasPrefix(p, prefix+".") || strings.HasPrefix(p, prefix+"[") {
 			return true
 		}
@@ -150,11 +152,11 @@ func TestV1HeaderMaps(t *testing.T) {
 	if r.Header == nil || len(r.Header) != 0 {
 		t.Errorf("Header = %#v, want empty non-nil map", r.Header)
 	}
-	if r.Headers["Accept"] != "application/json" {
+	if !reflect.DeepEqual(r.Headers["Accept"], definition.HeaderValues{"application/json"}) {
 		t.Errorf("Headers = %#v", r.Headers)
 	}
 	r = d.Scenarios[0].Steps[1].Request
-	if r.Header["X-Old"] != "1" || r.Headers["X-New"] != "2" {
+	if r.Header["X-Old"] != "1" || !reflect.DeepEqual(r.Headers["X-New"], definition.HeaderValues{"2"}) {
 		t.Errorf("both maps: Header = %v, Headers = %v", r.Header, r.Headers)
 	}
 	out, _ := json.Marshal(d.Scenarios[0].Steps[0].Request)
@@ -392,7 +394,7 @@ func TestV1TypeDifferential(t *testing.T) {
 		{"headers value", `{` + step(`, "headers": {"A": 1, "B": "2"}`) + `}`, nil,
 			[]string{"scenarios[0].steps[1].request.headers.A: must be a string"},
 			func(t *testing.T, d *definition.Definition) {
-				if h := d.Scenarios[0].Steps[1].Request.Headers; !reflect.DeepEqual(h, map[string]string{"B": "2"}) {
+				if h := d.Scenarios[0].Steps[1].Request.Headers; !reflect.DeepEqual(h, map[string]definition.HeaderValues{"B": {"2"}}) {
 					t.Errorf("Headers = %v", h)
 				}
 			}},

@@ -1,0 +1,28 @@
+{
+  "schema_version": "2.0",
+  "name": "discard_body with a json check",
+  "virtual_users": 1,
+  "duration": "10s",
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Send",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/api"
+          },
+          "discard_body": true,
+          "checks": [
+            {
+              "type": "json",
+              "selector": "$.id",
+              "exists": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

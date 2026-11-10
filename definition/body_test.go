@@ -15,11 +15,11 @@ const (
 	rq            = "scenarios[0].steps[0].request"
 	bodyNeedsJSON = `is required with body_type "json"`
 	bodyOnlyJSON  = `only applies with body_type "json"`
-	bodyOnlyForm  = `only applies with body_type "form"`
+	bodyOnlyForm  = `only applies with body_type "form" or "multipart"`
 	bodyWithJSON  = `cannot be combined with body_type "json"; use body_json`
 	bodyWithForm  = `cannot be combined with body_type "form"; use fields`
 	fieldDup      = "appears more than once; field names must be unique"
-	badBodyType   = `must be one of "raw", "json", "form", got `
+	badBodyType   = `must be one of "raw", "json", "form", "multipart", got `
 )
 
 // bodyFixtureProblems maps each invalid fixture for request bodies to the
@@ -113,8 +113,8 @@ func TestBodyRules(t *testing.T) {
 		{name: "names that differ by case", keys: `"body_type":"form","fields":{"a":"1","A":"2"}`},
 		{name: "many fields", keys: `"body_type":"form","fields":{` + manyFields(40, "") + `}`},
 
-		{name: "unknown body_type", keys: `"body_type":"multipart"`,
-			want: []string{rq + ".body_type: " + badBodyType + `"multipart"`}},
+		{name: "unknown body_type", keys: `"body_type":"multipart/form-data"`,
+			want: []string{rq + ".body_type: " + badBodyType + `"multipart/form-data"`}},
 		{name: "unknown body_type reports only itself", keys: `"body_type":"JSON","body_json":{"a":1},"body":"x"`,
 			want: []string{rq + ".body_type: " + badBodyType + `"JSON"`}},
 		{name: "json without body_json", keys: `"body_type":"json"`,
