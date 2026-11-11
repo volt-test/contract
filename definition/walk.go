@@ -340,6 +340,10 @@ func (w *walker) walk(raw json.RawMessage, t reflect.Type, path string) {
 		return
 	}
 	t = derefType(t)
+	if t == headerValuesType {
+		headerValueProblems(raw, path, &w.problems)
+		return
+	}
 	if t == fieldsType {
 		// Fields decodes itself, but its problems belong to its members:
 		// each value must be a string and each name used once.
@@ -512,6 +516,18 @@ func (w *v1walker) problem(path, pattern, msg string, loose bool) {
 // the wrong JSON type (the problem is already recorded).
 func (w *v1walker) value(raw json.RawMessage, t reflect.Type, path, pattern string, loose bool) (json.RawMessage, bool) {
 	raw = bytes.TrimSpace(raw)
+	if derefType(t) == headerValuesType && len(raw) > 0 {
+		// v1 header values are strings: an array is the same type problem
+		// as in a map of strings, and null reads as "" as it does there.
+		switch {
+		case string(raw) == "null":
+			return json.RawMessage(`""`), true
+		case raw[0] != '"':
+			w.problem(path, pattern, "must be a string", loose)
+			return nil, false
+		}
+		return raw, true
+	}
 	if len(raw) == 0 || string(raw) == "null" {
 		return raw, true
 	}

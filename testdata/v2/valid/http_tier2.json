@@ -1,0 +1,69 @@
+{
+  "schema_version": "2.0",
+  "name": "Response bodies, timeouts and headers",
+  "virtual_users": 2,
+  "duration": "30s",
+  "http_timeout": "30s",
+  "http": {
+    "max_body_size": "4mib",
+    "discard_bodies": true,
+    "connect_timeout": "5s",
+    "tls_handshake_timeout": "5s",
+    "response_header_timeout": "20s"
+  },
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Home by IP",
+          "request": {
+            "method": "GET",
+            "url": "https://10.0.0.5/",
+            "headers": {
+              "Host": "shop.example.com",
+              "Accept": ["text/html", "application/xhtml+xml"],
+              "User-Agent": "volt-test-fixture/1.0",
+              "X-Trace": ["a", "${uuid}", "a"]
+            },
+            "timeout": "2s"
+          },
+          "discard_body": true,
+          "checks": [
+            {"type": "status", "in": [200]},
+            {"type": "body", "size": "> 0"},
+            {"type": "header", "selector": "Content-Type", "contains": "html"}
+          ],
+          "extract": [
+            {"variable_name": "session", "selector": "session", "type": "cookie"},
+            {"variable_name": "etag", "selector": "ETag", "type": "header"}
+          ]
+        },
+        {
+          "name": "Logo",
+          "request": {"method": "GET", "url": "https://shop.example.com/logo.png"},
+          "response_type": "binary",
+          "discard_body": false,
+          "checks": [
+            {"type": "body", "size": "< 1mb"},
+            {"type": "body", "matches": "PNG"}
+          ],
+          "extract": [
+            {"variable_name": "width", "selector": "IHDR(....)", "type": "regex"}
+          ]
+        },
+        {
+          "name": "Product",
+          "request": {"method": "GET", "url": "https://shop.example.com/api/products/1", "timeout": "1m30s"},
+          "response_type": "text",
+          "checks": [
+            {"type": "json", "selector": "$.id", "exists": true}
+          ],
+          "extract": [
+            {"variable_name": "title", "selector": "$.title", "type": "json"}
+          ]
+        }
+      ]
+    }
+  ]
+}

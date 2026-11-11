@@ -1,0 +1,24 @@
+{
+  "schema_version": "2.0",
+  "name": "Host under two spellings",
+  "virtual_users": 1,
+  "duration": "10s",
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Send",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/api",
+            "headers": {
+              "Host": "a.example.com",
+              "host": "b.example.com"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

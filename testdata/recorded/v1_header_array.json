@@ -1,0 +1,40 @@
+{
+  "name": "v1 definition with header values that are not strings",
+  "virtual_users": 1,
+  "duration": "5s",
+  "scenarios": [
+    {
+      "name": "Browse",
+      "steps": [
+        {
+          "name": "Home",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/",
+            "headers": {
+              "Accept": ["text/html", "application/json"],
+              "User-Agent": "volt-test-fixture",
+              "X-Empty": [],
+              "X-Null": null
+            }
+          }
+        },
+        {
+          "name": "Cart",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/cart",
+            "headers": {
+              "X-Mixed": ["a", 1],
+              "X-Number": 5,
+              "X-Object": {"a": "b"},
+              "X-Bool": true,
+              "X-One": ["only"],
+              "X-Kept": "yes"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

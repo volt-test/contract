@@ -18,9 +18,11 @@
 // case-insensitively, and v2-only keys (contract:"v2", such as
 // target.base_url, thresholds, expected_statuses, http, tls, load, a
 // scenario's run_once and teardown, a step's checks, follow_redirects,
-// max_redirects and once_per_vu, a request's body_type, body_json and
-// fields, and an extractor's required, on_fail and pick) are dropped
-// unread. Values are checked for their
+// max_redirects, once_per_vu, discard_body and response_type, a request's
+// body_type, body_json, fields, files, body_base64 and timeout, and an
+// extractor's required, on_fail and pick) are dropped unread. A request's
+// headers stay strings in v1: an array value is a loose type problem, as
+// before arrays joined v2. Values are checked for their
 // JSON type only, with two classes of field:
 //
 //   - Core fields are decoded by every v1 reader (the headless CLI, the
@@ -190,15 +192,20 @@
 // optional. "" and 0 count as absent; follow_redirects is a *bool, so an
 // explicit false is a value and is kept:
 //
-//	key                       default     meaning
-//	http.follow_redirects     true        follow 3xx redirects
-//	http.max_redirects        10          most redirects per request; 0 means the default
-//	http.version              negotiated  "1.1" forces HTTP/1.1; absent, HTTP/2 over TLS when offered
-//	tls.insecure_skip_verify  false       skip verification of the target's certificate
-//	tls.min_version           "1.2"       "1.0", "1.1", "1.2" or "1.3"
-//	tls.client_cert           none        client certificate; requires client_key
-//	tls.client_key            none        its unencrypted private key; requires client_cert
-//	tls.ca_cert               none        certificates trusted in addition to the system roots
+//	key                           default     meaning
+//	http.follow_redirects         true        follow 3xx redirects
+//	http.max_redirects            10          most redirects per request; 0 means the default
+//	http.version                  negotiated  "1.1" forces HTTP/1.1; absent, HTTP/2 over TLS when offered
+//	http.max_body_size            "1mib"      most bytes of a response body kept; the rest is read and dropped
+//	http.discard_bodies           false       read and drop bodies, except on steps that read them
+//	http.connect_timeout          "10s"       most time to open a TCP connection
+//	http.tls_handshake_timeout    "10s"       most time for the TLS handshake
+//	http.response_header_timeout  none        most time to wait for the response headers
+//	tls.insecure_skip_verify      false       skip verification of the target's certificate
+//	tls.min_version               "1.2"       "1.0", "1.1", "1.2" or "1.3"
+//	tls.client_cert               none        client certificate; requires client_key
+//	tls.client_key                none        its unencrypted private key; requires client_cert
+//	tls.ca_cert                   none        certificates trusted in addition to the system roots
 //
 // A Step overrides the redirect options with FollowRedirects and
 // MaxRedirects; there is no scenario-level setting. Following is turned off
@@ -229,8 +236,21 @@
 // definition as written. With insecure_skip_verify true, ca_cert has no
 // effect. Parse problems for these three keys never repeat the value.
 //
+// max_body_size is a size with the units of a size threshold
+// (thresholds.ParseSize), greater than zero and at most 1gib; the
+// timeouts are durations greater than zero. A request's timeout bounds
+// that request (default http_timeout). Step.ReadsBody reports whether a
+// step has a check or extractor that reads the body; such a step keeps its
+// body under discard_bodies. A step's discard_body overrides
+// discard_bodies for that step: true drops the body and is refused on a
+// step that reads it, false keeps it. A step's response_type "binary"
+// keeps the raw bytes for body checks and regex extractors and is refused
+// with json and html checks and extractors.
+//
 // The http and tls objects and the step keys follow_redirects and
-// max_redirects joined schema_version "2.0" while it is a preview.
+// max_redirects joined schema_version "2.0" while it is a preview, and so
+// did the http body and timeout keys, discard_body, response_type and a
+// request's timeout.
 //
 // # Load model (v2)
 //
@@ -313,15 +333,27 @@
 // an unknown body_type, a non-empty body with json or form, body_json
 // without json (which requires it), fields without form, a body_json that
 // is not an object or array, a field value that is not a string and a
-// field name used twice; {} fields read as absent. The README section
-// "Request bodies" gives the full rules. body_type, body_json and fields
-// joined schema_version "2.0" while it is a preview.
+// field name used twice; {} fields read as absent.
+//
+// BodyTypeMultipart sends Fields and then Files, in field name order, as
+// multipart/form-data and needs at least one of them; a name is a field
+// or a file, not both, and has no CR, LF or NUL. Each FilePart has a Path
+// (not blank, no CR, LF or NUL) or ContentBase64 (standard base64), and
+// an optional Filename (substituted) and ContentType. A raw request may
+// send BodyBase64 instead of Body. The decoded inline content
+// of a definition is capped at MaxInlineBinaryBytes. Headers are
+// HeaderValues: a string or, in v2, a non-empty array sent once per value;
+// a Host header takes one value, whatever its case. The README section
+// "Request bodies" gives the full rules. body_type, body_json, fields,
+// files, body_base64 and header arrays joined schema_version "2.0" while
+// it is a preview.
 //
 // # VoltTest Cloud (v2)
 //
 // CloudProblems lists what VoltTest Cloud refuses in a definition Parse
-// accepts, for a run on a given number of nodes: tls file paths, ${env.*}
-// references, and run_once and teardown scenarios, in that order. It
+// accepts, for a run on a given number of nodes: tls file paths, binary
+// request content (files and body_base64), ${env.*} references, and
+// run_once and teardown scenarios, in that order. It
 // returns nil for v1. The README section "VoltTest Cloud" gives the paths
 // and messages.
 package definition

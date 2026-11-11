@@ -159,7 +159,8 @@ func (Secret) GoString() string { return redacted }
 func (Secret) MarshalJSON() ([]byte, error) { return []byte(`"` + redacted + `"`), nil }
 
 // HTTPOptions are the test-level HTTP options. A step can override the
-// redirect options with its own follow_redirects and max_redirects.
+// redirect options with its own follow_redirects and max_redirects, and
+// discard_bodies with its own discard_body.
 type HTTPOptions struct {
 	// Follow redirects (default true). With false, the 3xx response and
 	// its Location header are what checks and extractors see. Set it to
@@ -173,6 +174,23 @@ type HTTPOptions struct {
 	// HTTP version: "1.1" forces HTTP/1.1. Absent, HTTP/2 is used over TLS
 	// when the server offers it, else HTTP/1.1.
 	Version string `json:"version,omitempty"`
+	// Most bytes of a response body kept in memory for checks and
+	// extractors (default "1mib", at most "1gib"), as a size such as
+	// "512kb" or "4mib". The rest of a longer body is read and dropped so
+	// the connection can be reused.
+	MaxBodySize string `json:"max_body_size,omitempty"`
+	// Read and drop response bodies without keeping them (default false),
+	// except on a step with a check or extractor that reads the body (see
+	// a step's discard_body, which overrides this for that step).
+	DiscardBodies bool `json:"discard_bodies,omitempty"`
+	// Most time to open a TCP connection, e.g. "5s" (default "10s").
+	ConnectTimeout string `json:"connect_timeout,omitempty"`
+	// Most time for the TLS handshake, e.g. "5s" (default "10s").
+	TLSHandshakeTimeout string `json:"tls_handshake_timeout,omitempty"`
+	// Most time to wait for the response headers once the request is sent,
+	// e.g. "30s" (default: no limit of its own; the request timeout still
+	// applies).
+	ResponseHeaderTimeout string `json:"response_header_timeout,omitempty"`
 }
 
 // TLSOptions are the TLS options for requests to https URLs.
@@ -352,25 +370,46 @@ type Step struct {
 	// iterations, which skip the step. Not allowed in a run_once or
 	// teardown scenario.
 	OncePerVU bool `json:"once_per_vu,omitempty" contract:"v2"`
+	// Overrides http.discard_bodies for this step: true reads and drops
+	// the response body without keeping it, false keeps it. true is not
+	// allowed when the step reads the body: a body check with equals,
+	// contains, not_contains or matches, a json or html check, or a json,
+	// regex or html extractor.
+	DiscardBody *bool `json:"discard_body,omitempty" contract:"v2"`
+	// How the response body is read: "text" (the default) or "binary".
+	// With "binary" regex extractors and body checks read the raw bytes,
+	// and json and html checks and extractors are not allowed.
+	ResponseType ResponseType `json:"response_type,omitempty" contract:"v2"`
 }
 
+// ResponseType is how a step reads its response body.
+type ResponseType string
+
+// The response types. The zero ResponseType means ResponseText.
+const (
+	ResponseText   ResponseType = "text"
+	ResponseBinary ResponseType = "binary"
+)
+
 // Request is an HTTP request template. URL, Body, header values, the
-// string leaves of BodyJSON and the values of Fields may contain
-// ${variable} references; object keys and field names are sent as
-// written.
+// string leaves of BodyJSON, the values of Fields and the file names of
+// Files may contain ${variable} references; object keys, field names and
+// file contents are sent as written.
 type Request struct {
 	// HTTP method, e.g. "GET".
 	Method string `json:"method" jsonschema:"required,minLength=1"`
 	// An absolute http(s) URL, a URL starting with ${variable}, or a path
 	// starting with "/" that is appended to target.base_url.
 	URL string `json:"url" jsonschema:"required,minLength=1"`
-	// Request body, sent as written after ${variable} substitution. Not
-	// allowed with body_type "json" or "form".
+	// Request body, sent as written after ${variable} substitution. Only
+	// allowed with body_type "raw" (the default).
 	Body string `json:"body,omitempty"`
-	// How the body is built: "raw" (the default) sends body as written,
-	// "json" sends body_json and "form" sends fields URL-encoded. With
-	// "json" and "form" the Content-Type header is set for you unless
-	// headers sets it.
+	// How the body is built: "raw" (the default) sends body (or
+	// body_base64) as written, "json" sends body_json, "form" sends fields
+	// URL-encoded and "multipart" sends fields and files as
+	// multipart/form-data. With "json" and "form" the Content-Type header
+	// is set for you unless headers sets it; with "multipart" it is always
+	// set for you, with the part boundary, and headers must not set it.
 	BodyType BodyType `json:"body_type,omitempty" contract:"v2"`
 	// The body for body_type "json": a JSON object or array, sent with its
 	// keys, key order and number literals as written. Each string value
@@ -380,17 +419,52 @@ type Request struct {
 	// integer built-in such as ${random_int(1,3)}. Any other string value
 	// is sent as a string. Keys are sent as written, never substituted.
 	BodyJSON JSONBody `json:"body_json,omitempty" contract:"v2"`
-	// The fields for body_type "form", sent URL-encoded in the order
-	// written. Each value is substituted, then encoded; names are encoded
-	// as written, never substituted. Names must be unique. Absent or {}
-	// with body_type "form" sends an empty body.
+	// The fields for body_type "form" or "multipart", in the order
+	// written. Each value is substituted; names are sent as written, never
+	// substituted. Names must be unique. With "form" they are sent
+	// URL-encoded, and absent or {} sends an empty body. With "multipart"
+	// each field is one part, before the files.
 	Fields Fields `json:"fields,omitempty" contract:"v2"`
+	// The files for body_type "multipart", by form field name, which must
+	// not also be a name in fields. Each file is one part, after the
+	// fields, in field name order. Not available on VoltTest Cloud yet.
+	Files map[string]FilePart `json:"files,omitempty" contract:"v2"`
+	// A binary body for body_type "raw", as standard base64 with padding
+	// and no line breaks. It is decoded once and sent as is, without
+	// substitution. Not allowed with body. Not available on VoltTest Cloud
+	// yet.
+	BodyBase64 string `json:"body_base64,omitempty" contract:"v2"`
+	// Most time for the whole request, redirects and the body included,
+	// e.g. "2s" (default http_timeout). A request that takes longer fails.
+	Timeout string `json:"timeout,omitempty" contract:"v2"`
 	// Header holds request headers under the v1 key "header". v1 readers
 	// differ in how they treat header and headers together, so Parse
 	// exposes both as sent.
 	Header map[string]string `json:"header,omitempty" contract:"v1" jsonschema:"-"`
-	// Request headers.
-	Headers map[string]string `json:"headers,omitempty" contract:"loose"`
+	// Request headers: a value is a string, or an array of strings to send
+	// the header once per value, in order. A Host header sets the host the
+	// request is sent as (one value only); the request still goes to the
+	// URL's host. A User-Agent header replaces the default one.
+	Headers map[string]HeaderValues `json:"headers,omitempty" contract:"loose"`
+}
+
+// FilePart is one file of a multipart request body.
+type FilePart struct {
+	// Path of the file on the machine that runs the test. A relative path
+	// resolves against the working directory of the process that runs the
+	// test. Use instead of content_base64. Not blank, and no line break or
+	// NUL.
+	Path string `json:"path,omitempty"`
+	// The file's content as standard base64 with padding and no line
+	// breaks. Use instead of path.
+	ContentBase64 string `json:"content_base64,omitempty"`
+	// File name sent in the part's Content-Disposition header, after
+	// ${variable} substitution (default: the last element of path, or the
+	// field name with content_base64).
+	Filename string `json:"filename,omitempty"`
+	// Media type sent in the part's Content-Type header, e.g. "image/png"
+	// (default "application/octet-stream").
+	ContentType string `json:"content_type,omitempty"`
 }
 
 // MarshalJSON keeps an empty but non-nil header map ("header": {}) in the
@@ -399,8 +473,8 @@ func (r Request) MarshalJSON() ([]byte, error) {
 	type plain Request
 	out := struct {
 		plain
-		Header  *map[string]string `json:"header,omitempty"`
-		Headers *map[string]string `json:"headers,omitempty"`
+		Header  *map[string]string       `json:"header,omitempty"`
+		Headers *map[string]HeaderValues `json:"headers,omitempty"`
 	}{plain: plain(r)}
 	if r.Header != nil {
 		out.Header = &r.Header
@@ -416,9 +490,10 @@ type BodyType string
 
 // The body types. The zero BodyType means BodyTypeRaw.
 const (
-	BodyTypeRaw  BodyType = "raw"
-	BodyTypeJSON BodyType = "json"
-	BodyTypeForm BodyType = "form"
+	BodyTypeRaw       BodyType = "raw"
+	BodyTypeJSON      BodyType = "json"
+	BodyTypeForm      BodyType = "form"
+	BodyTypeMultipart BodyType = "multipart"
 )
 
 // BodyKind returns the request's body type: BodyTypeRaw when body_type

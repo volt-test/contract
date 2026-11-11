@@ -297,3 +297,70 @@ func TestCloudProblemsManyRefs(t *testing.T) {
 		t.Errorf("last problem %s", got[n/2-1])
 	}
 }
+
+const cloudBinary = "is not available on VoltTest Cloud yet; run this test headless"
+
+// Binary request content is refused on VoltTest Cloud at each value: the
+// request body_base64, then each file's path or content_base64 by field
+// name. Multipart fields alone are allowed. The message does not point to
+// content_base64 as a way around a path.
+func TestCloudProblemsInlineBinary(t *testing.T) {
+	const rp = "scenarios[0].steps[0].request"
+	for _, tc := range []struct {
+		fixture string
+		want    []definition.Problem
+	}{
+		{"cloud_multipart_path.json", []definition.Problem{{Path: rp + ".files.doc.path", Message: cloudBinary}}},
+		{"cloud_multipart_content.json", []definition.Problem{{Path: rp + ".files.doc.content_base64", Message: cloudBinary}}},
+		{"cloud_body_base64.json", []definition.Problem{{Path: rp + ".body_base64", Message: cloudBinary}}},
+		{"cloud_multipart_fields.json", nil},
+		{"multipart.json", []definition.Problem{
+			{Path: rp + ".files.avatar.content_base64", Message: cloudBinary},
+			{Path: rp + ".files.report.path", Message: cloudBinary},
+			{Path: "scenarios[0].steps[1].request.body_base64", Message: cloudBinary},
+		}},
+	} {
+		t.Run(tc.fixture, func(t *testing.T) {
+			wantCloudProblems(t, readFile(t, "../testdata/v2/valid/"+tc.fixture), 1, tc.want)
+		})
+	}
+	for _, p := range definition.CloudProblems(mustParse(t, readFile(t, "../testdata/v2/valid/multipart.json")), 1) {
+		if strings.Contains(p.Message, "content_base64") || strings.Contains(p.Message, "PEM") {
+			t.Errorf("%s: the message suggests a cloud form", p)
+		}
+	}
+}
+
+// The binary refusals come before the ${env.*} ones, step by step, and file
+// names are quoted like other keys. A file's filename is scanned after the
+// fields and before the headers, by field name.
+func TestCloudProblemsInlineBinaryOrder(t *testing.T) {
+	data := cloudStepsDoc(`{"base_url": "https://api.test"}`, `
+		{"name": "a", "request": {"method": "POST", "url": "/a/${env.A}", "body_base64": "AAAA"}},
+		{"name": "b", "request": {"method": "POST", "url": "/b", "body_type": "multipart", "headers": {"X": "${env.H}"},
+			"fields": {"t": "${env.T}"}, "files": {"z": {"path": "z.bin", "filename": "${env.Z}"}, "a b": {"content_base64": "AAAA", "filename": "${env.F}"}}}}`)
+	wantCloudProblems(t, data, 1, []definition.Problem{
+		{Path: "scenarios[0].steps[0].request.body_base64", Message: cloudBinary},
+		{Path: `scenarios[0].steps[1].request.files["a b"].content_base64`, Message: cloudBinary},
+		{Path: "scenarios[0].steps[1].request.files.z.path", Message: cloudBinary},
+		cloudEnv("scenarios[0].steps[0].request.url", "${env.A}"),
+		cloudEnv("scenarios[0].steps[1].request.fields.t", "${env.T}"),
+		cloudEnv(`scenarios[0].steps[1].request.files["a b"].filename`, "${env.F}"),
+		cloudEnv("scenarios[0].steps[1].request.files.z.filename", "${env.Z}"),
+		cloudEnv("scenarios[0].steps[1].request.headers.X", "${env.H}"),
+	})
+}
+
+// Every value of a header is scanned for ${env.*}: one value at the
+// header's path, several at their index.
+func TestCloudProblemsEnvHeaderValues(t *testing.T) {
+	data := cloudStepsDoc(`{"base_url": "https://api.test"}`, `
+		{"name": "a", "request": {"method": "GET", "url": "/a",
+			"headers": {"Host": ["${env.HOST}"], "X-A": ["ok", "${env.A}", "${env.A}"], "X-B": "${env.B}"}}}`)
+	wantCloudProblems(t, data, 1, []definition.Problem{
+		cloudEnv("scenarios[0].steps[0].request.headers.Host", "${env.HOST}"),
+		cloudEnv("scenarios[0].steps[0].request.headers.X-A[1]", "${env.A}"),
+		cloudEnv("scenarios[0].steps[0].request.headers.X-A[2]", "${env.A}"),
+		cloudEnv("scenarios[0].steps[0].request.headers.X-B", "${env.B}"),
+	})
+}

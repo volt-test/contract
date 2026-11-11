@@ -51,6 +51,8 @@ var unknownFixtures = map[string][]string{
 	"unknown_tls.json":                       {"tls.verify"},
 	"unknown_scenario_follow_redirects.json": {"scenarios[0].follow_redirects"},
 	"unknown_request_follow_redirects.json":  {"scenarios[0].steps[0].request.follow_redirects"},
+	"unknown_file_part.json":                 {"scenarios[0].steps[0].request.files.doc.name"},
+	"unknown_step_timeout.json":              {"scenarios[0].steps[0].timeout"},
 	"unknown_load_start_rate.json":           {"load.start_rate"},
 	"unknown_load_stage.json":                {"load.stages[0].rate"},
 }
@@ -169,7 +171,7 @@ func TestV2Problems(t *testing.T) {
 		{"null array", func(m map[string]any) { m["stages"] = nil }, []string{"stages: must not be null"}},
 		{"null array element", func(m map[string]any) { m["scenarios"] = []any{nil} }, []string{"scenarios[0]: must not be null"}},
 		{"null header value", func(m map[string]any) { request0(m)["headers"] = map[string]any{"A": nil} }, []string{"scenarios[0].steps[0].request.headers.A: must not be null"}},
-		{"header value not string", func(m map[string]any) { request0(m)["headers"] = map[string]any{"A": 1} }, []string{"scenarios[0].steps[0].request.headers.A: must be a string"}},
+		{"header value not string", func(m map[string]any) { request0(m)["headers"] = map[string]any{"A": 1} }, []string{"scenarios[0].steps[0].request.headers.A: must be a string or an array of strings"}},
 		{"string at object", func(m map[string]any) { m["target"] = "https://a" }, []string{"target: must be an object"}},
 		{"array at object", func(m map[string]any) { scenario0(m)["data_config"] = []any{} }, []string{"scenarios[0].data_config: must be an object"}},
 		{"object at array", func(m map[string]any) { m["scenarios"] = map[string]any{} }, []string{"scenarios: must be an array"}},
@@ -576,7 +578,7 @@ func TestV2RoundTrip(t *testing.T) {
 			DataConfig: &definition.DataConfig{DataSource: "a.csv", DataContent: "YQ==", DataFormat: "csv", HasHeader: true, Mode: "unique"},
 			Steps: []definition.Step{{
 				Name: "a", ThinkTime: "1ms", Thresholds: []definition.ThresholdConfig{{Expr: "ttfb_p99.9 <= 50ms"}},
-				Request:         definition.Request{Method: "POST", URL: "/a", Body: "{}", Headers: map[string]string{"A": "b"}},
+				Request:         definition.Request{Method: "POST", URL: "/a", Body: "{}", Headers: map[string]definition.HeaderValues{"A": {"b"}}},
 				Extract:         []definition.Extract{{VariableName: "v", Selector: "p", Attribute: "href", Type: "html"}},
 				FollowRedirects: &yes, MaxRedirects: 2,
 			}, {

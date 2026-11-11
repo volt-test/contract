@@ -3,6 +3,8 @@ package definition
 import (
 	"encoding/pem"
 	"strings"
+
+	"github.com/volt-test/contract/thresholds"
 )
 
 // Values the engines accept for http.version and tls.min_version. Both
@@ -11,6 +13,10 @@ var (
 	httpVersions = []string{"1.1"}
 	tlsVersions  = []string{"1.0", "1.1", "1.2", "1.3"}
 )
+
+// maxBodySize is the largest http.max_body_size Parse accepts, in
+// bytes (1 GiB).
+const maxBodySize = 1 << 30
 
 // pemBegin starts every PEM block.
 const pemBegin = "-----BEGIN"
@@ -40,6 +46,26 @@ func validateHTTPTLS(ps *problems, d *Definition) {
 		ps.maxRedirects("http.max_redirects", h.MaxRedirects)
 		if h.Version != "" {
 			ps.oneOf("http.version", h.Version, httpVersions)
+		}
+		if h.MaxBodySize != "" {
+			n, err := thresholds.ParseSize(h.MaxBodySize)
+			switch {
+			case err != nil:
+				ps.add("http.max_body_size", strings.TrimPrefix(err.Error(), "thresholds: "))
+			case n == 0:
+				ps.add("http.max_body_size", "must be greater than zero; to drop every body, set discard_bodies: true")
+			case n > maxBodySize:
+				ps.add("http.max_body_size", "must be at most 1gib (1073741824 bytes)")
+			}
+		}
+		for _, t := range [...]struct{ path, v string }{
+			{"http.connect_timeout", h.ConnectTimeout},
+			{"http.tls_handshake_timeout", h.TLSHandshakeTimeout},
+			{"http.response_header_timeout", h.ResponseHeaderTimeout},
+		} {
+			if t.v != "" {
+				ps.positiveDuration(t.path, t.v, "")
+			}
 		}
 	}
 	t := d.TLS

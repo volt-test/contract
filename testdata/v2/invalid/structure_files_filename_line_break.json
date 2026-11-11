@@ -1,0 +1,27 @@
+{
+  "schema_version": "2.0",
+  "name": "File name with a line break",
+  "virtual_users": 1,
+  "duration": "10s",
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Send",
+          "request": {
+            "method": "POST",
+            "url": "https://shop.example.com/api",
+            "body_type": "multipart",
+            "files": {
+              "doc": {
+                "path": "report.pdf",
+                "filename": "a.pdf\r\nX-Injected: 1"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

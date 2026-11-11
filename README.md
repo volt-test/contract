@@ -35,9 +35,15 @@ v2 and later definitions carry `schema_version` as a `"MAJOR.MINOR"` string.
   step's `follow_redirects` and `max_redirects`), the [arrival-rate
   load](#arrival-rate-load) (`load`), [setup and
   teardown](#setup-and-teardown) scenarios (`run_once`, `teardown`),
-  [once-per-VU steps](#once-per-vu-steps) (`once_per_vu`) and typed
-  [request bodies](#request-bodies) (`body_type`, `body_json`, `fields`)
-  joined `"2.0"` under this rule.
+  [once-per-VU steps](#once-per-vu-steps) (`once_per_vu`), typed
+  [request bodies](#request-bodies) (`body_type`, `body_json`, `fields`),
+  multipart and binary bodies (`body_type: "multipart"`, `files`,
+  `body_base64`), [header values](#headers) given as arrays, a request's
+  `timeout`, the [response body](#response-bodies) keys
+  (`http.max_body_size`, `http.discard_bodies`, a step's `discard_body`
+  and `response_type`) and the [connection timeouts](#timeouts)
+  (`http.connect_timeout`, `http.tls_handshake_timeout`,
+  `http.response_header_timeout`) joined `"2.0"` under this rule.
 - A reader rejects an unknown major, or a minor newer than it supports.
 
 The module version and `schema_version` move independently: schema `"2.0"`
@@ -83,19 +89,32 @@ does not mean module v2.
     inline PEM holding complete blocks of the right kind, and no blank or
     multi-line file path (see [HTTP and TLS
     options](#http-and-tls-options));
-  - request bodies: a known `body_type`, `body` only with `raw`,
-    `body_json` (an object or array) only with and required by `json`,
-    and `fields` (string values, each name once) only with `form` (see
-    [Request bodies](#request-bodies)).
+  - request bodies: a known `body_type`, `body` or `body_base64` (not
+    both) only with `raw`, `body_json` (an object or array) only with and
+    required by `json`, `fields` (string values, each name once) only with
+    `form` or `multipart`, and `files` only with `multipart`, which needs
+    a field or a file; each file has a `path` or `content_base64`, and no
+    name is both a field and a file (see [Request bodies](#request-bodies));
+  - headers: a string or a non-empty array of strings, one value for
+    `Host` under any spelling, and no `Content-Type` with `multipart` (see
+    [Headers](#headers));
+  - response bodies and timeouts: `max_body_size` a size above zero and
+    at most `1gib`, timeouts durations above zero, no check or extractor
+    that reads a body `discard_body` drops, and no json or html check or
+    extractor with `response_type: "binary"` (see [Response
+    bodies](#response-bodies)).
 - **v1** is read the way the v1 readers (the CLI, the cloud engine and the
   backend) read it. Unknown keys are ignored, keys match case-insensitively,
   and v2-only keys (`target.base_url`, `thresholds` at every level,
   `expected_statuses`, `http`, `tls`, `load`, a scenario's `run_once` and
   `teardown`, a step's `checks`,
-  `follow_redirects`, `max_redirects` and `once_per_vu`, a request's
-  `body_type`, `body_json` and `fields`, and an extractor's `required`,
-  `on_fail` and `pick`) are dropped unread, whatever their value. Values are
-  checked for their JSON type only:
+  `follow_redirects`, `max_redirects`, `once_per_vu`, `discard_body` and
+  `response_type`, a request's `body_type`, `body_json`, `fields`, `files`,
+  `body_base64` and `timeout`, and an extractor's `required`, `on_fail`
+  and `pick`) are dropped unread, whatever their value. A header value is
+  a string in v1: an array is a type problem in a loose field, as below,
+  exactly as before arrays joined v2. Values are checked for their JSON
+  type only:
   - **core** fields, which every v1 reader decodes: a value of the wrong
     type fails `Parse`, as it fails every reader;
   - **loose** fields, which some v1 reader ignores: the top-level
@@ -164,7 +183,13 @@ contents of `client_cert`, `client_key` and `ca_cert`, and blank or
 multi-line file paths. For `load` it also checks that durations are
 greater than zero and that `max_vus` is at least `preallocated_vus`. For
 `fields` it also checks that each name appears once (a JSON Schema
-validator reads a repeated key as its last value).
+validator reads a repeated key as its last value). For headers, files and
+binary bodies it also checks the `Host` and `Content-Type` rules (header
+names match in any case), media types, line breaks in part names, file
+paths, file names and media types, a name used as both a field and a
+file, base64 values and their total size; for response bodies,
+`max_body_size` and the checks and extractors that `discard_body` and
+`response_type` allow.
 
 ### Error size
 
@@ -572,6 +597,11 @@ turns following off.
 | `http.follow_redirects` | `true` | Follow 3xx redirects. |
 | `http.max_redirects` | `10` | Most redirects followed for one request; a request that needs more fails. `0` means the default. |
 | `http.version` | negotiated | `"1.1"` forces HTTP/1.1. Absent, HTTP/2 is used over TLS when the server offers it, else HTTP/1.1. `"1.1"` is the only value. |
+| `http.max_body_size` | `"1mib"` | Most bytes of a response body kept in memory for checks and extractors, at most `"1gib"`. See [Response bodies](#response-bodies). |
+| `http.discard_bodies` | `false` | Read and drop response bodies without keeping them, except on steps that read the body. See [Response bodies](#response-bodies). |
+| `http.connect_timeout` | `"10s"` | Most time to open a TCP connection. |
+| `http.tls_handshake_timeout` | `"10s"` | Most time for the TLS handshake. |
+| `http.response_header_timeout` | none | Most time to wait for the response headers once the request is sent. |
 | `tls.insecure_skip_verify` | `false` | Skip verification of the target's certificate, e.g. a staging server with a self-signed certificate. |
 | `tls.min_version` | `"1.2"` | Lowest TLS version accepted: `"1.0"`, `"1.1"`, `"1.2"` or `"1.3"`. The old versions are there to test legacy targets. |
 | `tls.client_cert` | none | Client certificate for mutual TLS: one or more `CERTIFICATE` blocks. Requires `client_key`. |
@@ -583,6 +613,70 @@ turns following off.
 
 These keys joined `"2.0"` while it is a preview (see
 [schema_version](#schema_version)). v1 definitions drop them unread.
+
+### Timeouts
+
+- `http_timeout` bounds each whole request, redirects and the body
+  included. A request's own `timeout` replaces it for that request:
+
+  ```json
+  {"name": "Search", "request": {"method": "GET", "url": "/search?q=a", "timeout": "2s"}}
+  ```
+
+- `http.connect_timeout` and `http.tls_handshake_timeout` bound opening a
+  connection; `http.response_header_timeout` bounds the wait for the
+  status line and headers after the request is sent.
+- Every timeout is a duration greater than zero; `""` means absent.
+
+### Response bodies
+
+```json
+"http": {"max_body_size": "4mib"},
+"steps": [
+  {"name": "Download", "request": {"method": "GET", "url": "/report.pdf"},
+   "discard_body": true, "checks": [{"type": "status", "in": [200]}, {"type": "body", "size": "> 0"}]},
+  {"name": "Logo", "request": {"method": "GET", "url": "/logo.png"},
+   "response_type": "binary", "checks": [{"type": "body", "matches": "PNG"}]}
+]
+```
+
+- **`http.max_body_size`** is a size with the units of a size threshold
+  (`b`, `kb`, `mb`, `gb`, `kib`, `mib`, `gib`, or a plain number of
+  bytes; `thresholds.ParseSize` reads it), greater than zero and at most
+  `1gib`. Up to that many bytes of each body are kept; the rest is read
+  and dropped so the connection can be reused.
+- **A step reads its body** when it has a `body` check with `equals`,
+  `contains`, `not_contains` or `matches`, a `json` or `html` check, or a
+  `json`, `regex` or `html` extractor (`Step.ReadsBody`). A `body` check
+  with `size` or `empty`, `status`, `header`, `timing`, `url` and `cookie`
+  checks, and `header` and `cookie` extractors do not read it.
+- **`discard_body`** on a step overrides `http.discard_bodies` for that
+  step: `true` reads and drops its body without keeping it, and `Parse`
+  refuses it on a step that reads its body; `false` keeps the body.
+- **`http.discard_bodies: true`** drops the body of every step that sets
+  no `discard_body`, except a step that reads its body, which keeps it.
+- **`response_type: "binary"`** on a step keeps the body as bytes: `body`
+  checks and `regex` extractors read the raw bytes. `json` and `html`
+  checks and extractors are refused on that step.
+  `"text"` (or absent) is the default.
+
+### Headers
+
+A header value is a string, or an array of strings to send the header
+once per value, in order:
+
+```json
+"headers": {"Accept": ["text/html", "application/json"], "Host": "shop.example.com"}
+```
+
+- An array must not be empty. One value, as a string or a one-element
+  array, is written back as a string.
+- `Host` sets the host the request is sent as, while it still goes to
+  the URL's host: a test can target an IP with the site's name. It takes
+  exactly one value, and only one key may name it, in any case (`Host`
+  and `host` together are refused).
+- `User-Agent` replaces the default one.
+- In v1 a header value is a string; see [v1 and v2](#v1-and-v2).
 
 ### Redirects
 
@@ -902,6 +996,7 @@ A request's `body_type` says how its body is built:
 | `"raw"` (or absent) | `body` | the string as written, after substitution | none |
 | `"json"` | `body_json` | a JSON object or array | `application/json` |
 | `"form"` | `fields` | URL-encoded `name=value` pairs | `application/x-www-form-urlencoded` |
+| `"multipart"` | `fields` and `files` | `multipart/form-data`: one part per field, then one per file | `multipart/form-data` with the boundary, always |
 
 ```json
 "steps": [
@@ -923,7 +1018,9 @@ A request's `body_type` says how its body is built:
 
 - **Content-Type.** With `json` and `form` the engine sets the
   `Content-Type` above, unless `headers` sets `Content-Type` (in any
-  case); then the request carries exactly that one header.
+  case); then the request carries exactly that one header. With
+  `multipart` the engine always sets it, because it carries the part
+  boundary, and `headers` must not set it.
 - **`body_json`.** Must be an object or an array. Its keys, key order and
   number literals (`19.90`, a 20-digit integer) are kept as written; the
   definition stores it compacted. Each string value is substituted on its
@@ -966,11 +1063,49 @@ A request's `body_type` says how its body is built:
   value, so `json.Marshal` of a `Definition` writes them escaped inside
   `body_json`, as it does in `body` and `headers`; the JSON value is the
   same, and the engine sends the characters themselves.
-- **v1.** v1 has `body` only; `body_type`, `body_json` and `fields` are
-  dropped unread.
+- **v1.** v1 has `body` only; `body_type`, `body_json`, `fields`, `files`
+  and `body_base64` are dropped unread.
 
 `body_type`, `body_json` and `fields` joined schema_version "2.0" while it
-is a preview.
+is a preview, and so did `multipart`, `files` and `body_base64`.
+
+### Multipart and binary bodies
+
+```json
+"request": {
+  "method": "POST", "url": "/api/reports",
+  "body_type": "multipart",
+  "fields": {"title": "Report ${uuid}"},
+  "files": {
+    "report": {"path": "fixtures/report.pdf", "filename": "report-${vu_id}.pdf", "content_type": "application/pdf"},
+    "avatar": {"content_base64": "iVBORw0KGgo=", "content_type": "image/png"}
+  }
+}
+```
+
+- **Parts.** The fields come first, in the order written, then the
+  files, by field name. Field values and file names are substituted;
+  field names and file contents are sent as written.
+- **A file** has exactly one of `path` (a file on the machine that runs
+  the test; a relative path resolves against that process's working
+  directory) and `content_base64`. `filename` defaults to the last
+  element of `path`, or to the field name with `content_base64`;
+  `content_type` defaults to `application/octet-stream` and must be a
+  media type such as `image/png`. A `path` must not be blank, and no
+  `path`, `filename`, `content_type` or field or file name may contain a
+  line break or NUL.
+- **Names.** A multipart body needs at least one field or file, and a
+  name is either a field or a file, not both.
+- **`body_base64`** sends binary bytes as the body of a `raw` request,
+  without substitution. It cannot sit next to a non-empty `body`.
+- **Base64** values (`content_base64`, `body_base64`) are standard
+  base64 with `=` padding and no line breaks; do not wrap the encoded
+  value (with GNU `base64`, use `base64 -w0`). Together they may decode to
+  at most 10 MiB per definition (`definition.MaxInlineBinaryBytes`); send
+  larger files by path. Problems never repeat the value.
+- **VoltTest Cloud** does not take files or `body_base64` yet; a
+  multipart body with `fields` only is fine. See
+  [VoltTest Cloud](#volttest-cloud).
 
 ## VoltTest Cloud
 
@@ -990,15 +1125,24 @@ It reports, in this order:
 1. **File paths in `tls`.** A `client_cert`, `client_key` or `ca_cert`
    that is not inline PEM (`IsInlinePEM`): a cloud node cannot read a
    file. The value is never repeated.
-2. **`${env.NAME}` references.** A cloud node's environment holds its own
+2. **Binary request content.** For each step, the request's
+   `body_base64`, then each multipart file's `path` or `content_base64`,
+   by field name: "is not available on VoltTest Cloud yet; run this test
+   headless". VoltTest Cloud cannot ship file content to its nodes yet,
+   and a path names a file that is not on the node. A multipart body with
+   `fields` only is allowed.
+3. **`${env.NAME}` references.** A cloud node's environment holds its own
    settings, not yours. Each distinct reference is reported as written,
    filters included, at each path where it appears: `target.base_url`,
    then for each step the request `url`, `body`, every string value in
-   `body_json`, every value in `fields` and every header, by sorted name.
+   `body_json`, every value in `fields`, each multipart file's
+   `filename` by field name, and every header value, by sorted
+   name (`headers.X-A` for one value, `headers.X-A[1]` for the second of
+   several).
    A reference runs from `${` to the first `}`; an unterminated `${env.X`
    is literal. Keys in `body_json` and names in `fields` are sent as
    written, so a reference in one is not refused.
-3. **Setup and teardown.** Each `run_once` and each `teardown` scenario,
+4. **Setup and teardown.** Each `run_once` and each `teardown` scenario,
    at that flag.
 
 No current refusal depends on `nodes`; it is kept for callers.

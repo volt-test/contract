@@ -1,0 +1,22 @@
+{
+  "schema_version": "2.0",
+  "name": "Binary body, refused on VoltTest Cloud",
+  "virtual_users": 1,
+  "duration": "30s",
+  "scenarios": [
+    {
+      "name": "Upload",
+      "steps": [
+        {
+          "name": "Send",
+          "request": {
+            "method": "POST",
+            "url": "https://shop.example.com/api/upload",
+            "headers": {"Content-Type": "application/octet-stream"},
+            "body_base64": "AAECAwQ="
+          }
+        }
+      ]
+    }
+  ]
+}

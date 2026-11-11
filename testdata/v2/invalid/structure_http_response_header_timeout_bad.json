@@ -1,0 +1,23 @@
+{
+  "schema_version": "2.0",
+  "name": "response_header_timeout that is not a duration",
+  "virtual_users": 1,
+  "duration": "10s",
+  "http": {
+    "response_header_timeout": "soon"
+  },
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Send",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/api"
+          }
+        }
+      ]
+    }
+  ]
+}

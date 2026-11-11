@@ -1,0 +1,21 @@
+{
+  "schema_version": "2.0",
+  "name": "Unknown response_type",
+  "virtual_users": 1,
+  "duration": "10s",
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Send",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/api"
+          },
+          "response_type": "image"
+        }
+      ]
+    }
+  ]
+}

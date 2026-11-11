@@ -1,0 +1,29 @@
+{
+  "schema_version": "2.0",
+  "name": "File named like a field",
+  "virtual_users": 1,
+  "duration": "10s",
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Send",
+          "request": {
+            "method": "POST",
+            "url": "https://shop.example.com/api",
+            "body_type": "multipart",
+            "fields": {
+              "doc": "draft"
+            },
+            "files": {
+              "doc": {
+                "path": "report.pdf"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

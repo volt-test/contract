@@ -1,0 +1,61 @@
+{
+  "name": "v1 definition with HTTP tier-2 keys",
+  "virtual_users": 2,
+  "duration": "10s",
+  "http_timeout": "5s",
+  "http": {
+    "max_body_size": "0.5b",
+    "discard_bodies": true,
+    "connect_timeout": "0s",
+    "tls_handshake_timeout": "-1s",
+    "response_header_timeout": "fast"
+  },
+  "scenarios": [
+    {
+      "name": "Upload",
+      "weight": 1,
+      "steps": [
+        {
+          "name": "Login",
+          "discard_body": true,
+          "response_type": "binary",
+          "request": {
+            "method": "POST",
+            "url": "https://api.example.com/login",
+            "header": {
+              "Content-Type": "application/json"
+            },
+            "body": "{\"email\":\"user@example.com\"}",
+            "timeout": "0s",
+            "body_base64": "not base64!"
+          },
+          "extract": [
+            {"variable_name": "token", "selector": "$.token", "type": "json"}
+          ]
+        },
+        {
+          "name": "Upload",
+          "response_type": "image",
+          "request": {
+            "method": "POST",
+            "url": "https://api.example.com/upload",
+            "headers": {
+              "Content-Type": "multipart/form-data",
+              "Host": "files.example.com"
+            },
+            "body": "raw",
+            "body_type": "multipart",
+            "fields": {"title": "Report"},
+            "files": {
+              "doc": {"path": "report.pdf", "content_base64": "AAAA", "filename": "a\r\nb", "content_type": "not a type"},
+              "empty": {}
+            }
+          },
+          "extract": [
+            {"variable_name": "id", "selector": "id=(\\d+)", "type": "regex"}
+          ]
+        }
+      ]
+    }
+  ]
+}

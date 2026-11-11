@@ -54,6 +54,12 @@ func generateSchema(t *testing.T) []byte {
 				return &jsonschema.Schema{AnyOf: []*jsonschema.Schema{{Type: "object"}, {Type: "array"}}}
 			case reflect.TypeOf(definition.Fields(nil)):
 				return &jsonschema.Schema{Type: "object", AdditionalProperties: &jsonschema.Schema{Type: "string"}}
+			case reflect.TypeOf(definition.HeaderValues(nil)):
+				one := uint64(1)
+				return &jsonschema.Schema{AnyOf: []*jsonschema.Schema{
+					{Type: "string"},
+					{Type: "array", Items: &jsonschema.Schema{Type: "string"}, MinItems: &one},
+				}}
 			}
 			return nil
 		},
@@ -77,11 +83,12 @@ func generateSchema(t *testing.T) []byte {
 		"Scenario":     "A sequence of steps that a virtual user runs.",
 		"DataConfig":   "A CSV data source. Each virtual user takes rows according to mode.",
 		"Step":         "One HTTP request in a scenario.",
-		"Request":      "An HTTP request. The URL, body, header values, the string values of body_json and the values of fields may contain ${variable} references; keys and field names are sent as written.",
+		"Request":      "An HTTP request. The URL, body, header values, the string values of body_json, the values of fields and file names may contain ${variable} references; keys, field names and file contents are sent as written.",
+		"FilePart":     "One file of a multipart request body: a path or base64 content, with an optional file name and media type.",
 		"Extract":      "A value to capture from the response.",
 		"Check":        "An assertion on the response: a type, a selector where the type needs one, and exactly one operator.",
 		"Threshold":    "A pass/fail rule: an expression such as \"p95 < 500ms\", or an object with the expression and abort settings.",
-		"HTTPOptions":  "HTTP client options for every request: redirects and the HTTP version.",
+		"HTTPOptions":  "HTTP client options for every request: redirects, the HTTP version, response bodies and connection timeouts.",
 		"TLSOptions":   "TLS options for HTTPS targets: verification, minimum version and client certificates.",
 		"Load":         "An arrival-rate load profile: iterations start at a set rate, picked up by idle virtual users.",
 		"RateStage":    "One stage of a ramping_rate load profile. The rate starts at 0 and moves linearly to each stage's target over that stage's duration.",
@@ -108,6 +115,7 @@ func generateSchema(t *testing.T) []byte {
 	setupTeardownRules(t, s)
 	oncePerVURules(t, s)
 	bodyRules(t, s)
+	responseRules(t, s)
 
 	b, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
@@ -315,17 +323,18 @@ func oncePerVURules(t *testing.T, s *jsonschema.Schema) {
 
 // bodyRules adds the body_type rules: body_type from its list ("" reads as
 // absent), body_json only with "json", which requires it, fields only with
-// "form" ({} reads as absent), and a non-empty body only with "raw" or no
+// "form" or "multipart" and files only with "multipart", which needs one of
+// them ({} reads as absent), and a non-empty body only with "raw" or no
 // body_type. Unique field names are Parse's alone; see knownSchemaLooser.
 func bodyRules(t *testing.T, s *jsonschema.Schema) {
 	t.Helper()
 	request := s.Definitions["Request"]
-	for _, k := range []string{"body", "body_type", "body_json", "fields"} {
+	for _, k := range []string{"body", "body_type", "body_json", "fields", "files", "body_base64"} {
 		if _, ok := request.Properties.Get(k); !ok {
 			t.Fatalf("schema has no property Request.%s", k)
 		}
 	}
-	zero := uint64(0)
+	zero, one := uint64(0), uint64(1)
 	bodyType, _ := request.Properties.Get("body_type")
 	enum := make([]any, len(definition.BodyTypesForTest))
 	for i, v := range definition.BodyTypesForTest {
@@ -350,16 +359,59 @@ func bodyRules(t *testing.T, s *jsonschema.Schema) {
 			prop("body", &jsonschema.Schema{MaxLength: &zero}, false),
 			prop("body_type", &jsonschema.Schema{Enum: []any{"", string(definition.BodyTypeRaw)}}, false),
 		}},
-		"body_type": {AnyOf: []*jsonschema.Schema{
-			prop("body_type", &jsonschema.Schema{Not: is(definition.BodyTypeJSON)}, false),
-			{Required: []string{"body_json"}},
+		"body_type": {AllOf: []*jsonschema.Schema{
+			{AnyOf: []*jsonschema.Schema{
+				prop("body_type", &jsonschema.Schema{Not: is(definition.BodyTypeJSON)}, false),
+				{Required: []string{"body_json"}},
+			}},
+			// multipart needs a field or a file; {} reads as absent.
+			{AnyOf: []*jsonschema.Schema{
+				prop("body_type", &jsonschema.Schema{Not: is(definition.BodyTypeMultipart)}, false),
+				prop("fields", &jsonschema.Schema{MinProperties: &one}, true),
+				prop("files", &jsonschema.Schema{MinProperties: &one}, true),
+			}},
 		}},
 		"body_json": prop("body_type", is(definition.BodyTypeJSON), true),
 		"fields": {AnyOf: []*jsonschema.Schema{
 			prop("fields", &jsonschema.Schema{MaxProperties: &zero}, false),
-			prop("body_type", is(definition.BodyTypeForm), true),
+			prop("body_type", &jsonschema.Schema{Enum: []any{string(definition.BodyTypeForm), string(definition.BodyTypeMultipart)}}, true),
+		}},
+		"files": {AnyOf: []*jsonschema.Schema{
+			prop("files", &jsonschema.Schema{MaxProperties: &zero}, false),
+			prop("body_type", is(definition.BodyTypeMultipart), true),
+		}},
+		"body_base64": {AnyOf: []*jsonschema.Schema{
+			prop("body_base64", &jsonschema.Schema{MaxLength: &zero}, false),
+			{AllOf: []*jsonschema.Schema{
+				prop("body_type", &jsonschema.Schema{Enum: []any{"", string(definition.BodyTypeRaw)}}, false),
+				prop("body", &jsonschema.Schema{MaxLength: &zero}, false),
+			}},
 		}},
 	}
+
+	// A file has path or content_base64, not both; "" reads as absent.
+	file := s.Definitions["FilePart"]
+	file.OneOf = []*jsonschema.Schema{
+		prop("path", &jsonschema.Schema{MinLength: &one}, true),
+		prop("content_base64", &jsonschema.Schema{MinLength: &one}, true),
+	}
+}
+
+// responseRules adds the response_type enum ("" reads as absent). Which
+// checks and extractors response_type and discard_body allow is Parse's
+// rule alone; see knownSchemaLooser.
+func responseRules(t *testing.T, s *jsonschema.Schema) {
+	t.Helper()
+	p, ok := s.Definitions["Step"].Properties.Get("response_type")
+	if !ok {
+		t.Fatal("schema has no property Step.response_type")
+	}
+	zero := uint64(0)
+	enum := make([]any, len(definition.ResponseTypesForTest))
+	for i, v := range definition.ResponseTypesForTest {
+		enum[i] = v
+	}
+	p.AnyOf = []*jsonschema.Schema{{Enum: enum}, {MaxLength: &zero}}
 }
 
 // thresholdSchema describes a threshold: the expression string, or the
@@ -507,6 +559,36 @@ var knownSchemaLooser = map[string]string{
 	"structure_think_time_trailing_hyphen.json": "durations are plain strings in the schema",
 
 	"structure_fields_duplicate.json": "JSON Schema reads an object with a duplicate key as its last member; Parse rejects a form field name used twice",
+
+	"structure_headers_host_two_values.json":             "header values are strings or arrays in the schema; the Host rule matches the name in any case",
+	"structure_headers_host_twice.json":                  "the schema matches header names exactly; the case-insensitive Host rule is kept to Parse",
+	"structure_multipart_content_type.json":              "the schema matches header names exactly; the case-insensitive Content-Type rule is kept to Parse",
+	"structure_multipart_field_name_line_break.json":     "fields names may hold line breaks with form; the multipart-only rule is Parse's",
+	"structure_files_name_line_break.json":               "file names share the multipart part-name rule with fields, whose names may hold line breaks with form; the rule is Parse's",
+	"structure_files_also_field.json":                    "a name used in both fields and files compares the keys of two objects",
+	"structure_files_blank_path.json":                    "optional keys take no pattern; a blank path is a Parse rule",
+	"structure_files_path_line_break.json":               "optional keys take no pattern; a line break in a path is a Parse rule",
+	"structure_files_filename_line_break.json":           "optional keys take no pattern; control characters in a file name are a Parse rule",
+	"structure_files_content_type_nul.json":              "optional keys take no pattern; control characters in a media type are a Parse rule",
+	"structure_files_bad_content_type.json":              "media types are plain strings in the schema",
+	"structure_files_bad_base64.json":                    "base64 values are plain strings in the schema",
+	"structure_binary_line_break.json":                   "base64 values are plain strings in the schema",
+	"structure_binary_bad_length.json":                   "base64 values are plain strings in the schema",
+	"structure_discard_body_contains.json":               "which checks and extractors read the body is Parse's rule",
+	"structure_discard_body_json_reader.json":            "which checks and extractors read the body is Parse's rule",
+	"structure_discard_body_html_reader.json":            "which checks and extractors read the body is Parse's rule",
+	"structure_discard_body_regex_extractor.json":        "which checks and extractors read the body is Parse's rule",
+	"structure_discard_body_json_extractor.json":         "which checks and extractors read the body is Parse's rule",
+	"structure_response_type_binary_json_reader.json":    "which checks and extractors read the body as text is Parse's rule",
+	"structure_response_type_binary_html_extractor.json": "which checks and extractors read the body as text is Parse's rule",
+	"structure_request_timeout_zero.json":                "durations are plain strings in the schema",
+	"structure_request_timeout_bad.json":                 "durations are plain strings in the schema",
+	"structure_http_max_body_size_bad.json":              "sizes are plain strings in the schema",
+	"structure_http_max_body_size_zero.json":             "sizes are plain strings in the schema",
+	"structure_http_max_body_size_too_big.json":          "sizes are plain strings in the schema",
+	"structure_http_connect_timeout_zero.json":           "durations are plain strings in the schema",
+	"structure_http_tls_handshake_timeout_negative.json": "durations are plain strings in the schema",
+	"structure_http_response_header_timeout_bad.json":    "durations are plain strings in the schema",
 }
 
 // TestSchemaAgreesWithParse checks that the schema and Parse agree on
@@ -728,6 +810,9 @@ func TestSchemaShape(t *testing.T) {
 	if got, want := optionalEnum("Request", "body_type"), sorted(definition.BodyTypesForTest); !reflect.DeepEqual(got, want) {
 		t.Errorf("schema request body_type %q != Parse %q", got, want)
 	}
+	if got, want := optionalEnum("Step", "response_type"), sorted(definition.ResponseTypesForTest); !reflect.DeepEqual(got, want) {
+		t.Errorf("schema step response_type %q != Parse %q", got, want)
+	}
 
 	checkShape(t, props, defs)
 	httpTLSShape(t, props, defs)
@@ -746,7 +831,7 @@ func bodyShape(t *testing.T, defs map[string]any) {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	if want := []string{"body", "body_json", "body_type", "fields", "headers", "method", "url"}; !reflect.DeepEqual(keys, want) {
+	if want := []string{"body", "body_base64", "body_json", "body_type", "fields", "files", "headers", "method", "timeout", "url"}; !reflect.DeepEqual(keys, want) {
 		t.Errorf("request keys = %q, want %q", keys, want)
 	}
 	if !reflect.DeepEqual(request["required"], []any{"method", "url"}) {
@@ -763,7 +848,7 @@ func bodyShape(t *testing.T, defs map[string]any) {
 	if fields["type"] != "object" || !reflect.DeepEqual(fields["additionalProperties"], map[string]any{"type": "string"}) {
 		t.Errorf("fields = %v, want an object of strings", fields)
 	}
-	for _, k := range []string{"body", "body_type", "body_json", "fields"} {
+	for _, k := range []string{"body", "body_type", "body_json", "fields", "files", "body_base64", "timeout"} {
 		for _, rule := range []string{"pattern", "minLength", "minItems", "minProperties"} {
 			if _, ok := obj(rp[k])[rule]; ok {
 				t.Errorf("request %s has %s; a zero value must stay valid", k, rule)
@@ -776,8 +861,37 @@ func bodyShape(t *testing.T, defs map[string]any) {
 		depKeys = append(depKeys, k)
 	}
 	sort.Strings(depKeys)
-	if want := []string{"body", "body_json", "body_type", "fields"}; !reflect.DeepEqual(depKeys, want) {
+	if want := []string{"body", "body_base64", "body_json", "body_type", "fields", "files"}; !reflect.DeepEqual(depKeys, want) {
 		t.Errorf("request dependentSchemas = %q, want %q", depKeys, want)
+	}
+
+	// A header value is a string or a non-empty array of strings.
+	wantHeader := map[string]any{"anyOf": []any{
+		map[string]any{"type": "string"},
+		map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "minItems": 1.0},
+	}}
+	headers := obj(rp["headers"])
+	if headers["type"] != "object" || !reflect.DeepEqual(headers["additionalProperties"], wantHeader) {
+		t.Errorf("headers = %v, want an object of %v", headers, wantHeader)
+	}
+	files := obj(rp["files"])
+	if files["type"] != "object" || !reflect.DeepEqual(files["additionalProperties"], map[string]any{"$ref": "#/$defs/FilePart"}) {
+		t.Errorf("files = %v, want an object of FilePart", files)
+	}
+	file := obj(defs["FilePart"])
+	var fileKeys []string
+	for k := range obj(file["properties"]) {
+		fileKeys = append(fileKeys, k)
+	}
+	sort.Strings(fileKeys)
+	if want := []string{"content_base64", "content_type", "filename", "path"}; !reflect.DeepEqual(fileKeys, want) {
+		t.Errorf("file keys = %q, want %q", fileKeys, want)
+	}
+	if _, ok := file["required"]; ok {
+		t.Error("$defs.FilePart has required keys; \"\" reads as absent, so the oneOf decides")
+	}
+	if branches, _ := file["oneOf"].([]any); len(branches) != 2 {
+		t.Errorf("$defs.FilePart oneOf = %v, want path or content_base64", file["oneOf"])
 	}
 }
 
@@ -835,7 +949,8 @@ func httpTLSShape(t *testing.T, props, defs map[string]any) {
 	}
 	httpDef, tlsDef := obj(defs["HTTPOptions"]), obj(defs["TLSOptions"])
 	hp, tp := obj(httpDef["properties"]), obj(tlsDef["properties"])
-	if got, want := keys(hp), []string{"follow_redirects", "max_redirects", "version"}; !reflect.DeepEqual(got, want) {
+	if got, want := keys(hp), []string{"connect_timeout", "discard_bodies", "follow_redirects", "max_body_size", "max_redirects",
+		"response_header_timeout", "tls_handshake_timeout", "version"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("http keys = %q, want %q", got, want)
 	}
 	if got, want := keys(tp), []string{"ca_cert", "client_cert", "client_key", "insecure_skip_verify", "min_version"}; !reflect.DeepEqual(got, want) {
