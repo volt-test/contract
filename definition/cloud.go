@@ -24,13 +24,16 @@ const (
 //     multipart file's path or content_base64, by field name. Cloud
 //     nodes cannot receive file content yet;
 //   - each distinct ${env.*} reference at each path where it is written:
-//     target.base_url, then per step the request url, body, each body_json
-//     string value, each fields value, each multipart file's filename (by
-//     field name) and each header (sorted by name).
-//     Keys and field names are sent as written, so they are not scanned;
+//     target.base_url, each test-level cookie and then var (each sorted by
+//     name), then per scenario its cookies and vars, and per step the
+//     request url, body, each body_json string value, each fields value,
+//     each multipart file's filename (by field name), each header (sorted
+//     by name) and the step's cookies.
+//     Keys, field names and cookie and var names are not scanned;
 //   - each run_once and each teardown scenario.
 //
-// No current refusal depends on nodes; it is kept for callers.
+// A scenario's own load and start_at are not refused here. No current
+// refusal depends on nodes; it is kept for callers.
 //
 // It returns nil for a nil or v1 definition. The result is not capped;
 // callers that build a ValidationError bound it.
@@ -85,7 +88,12 @@ func cloudEnvProblems(ps []Problem, d *Definition) []Problem {
 	if d.Target != nil {
 		ps = appendEnvRefs(ps, "target.base_url", d.Target.BaseURL)
 	}
+	ps = appendMapEnvRefs(ps, "cookies", d.Cookies)
+	ps = appendMapEnvRefs(ps, "vars", d.Vars)
 	for i, sc := range d.Scenarios {
+		sp := indexPath("scenarios", i)
+		ps = appendMapEnvRefs(ps, sp+".cookies", sc.Cookies)
+		ps = appendMapEnvRefs(ps, sp+".vars", sc.Vars)
 		for j, st := range sc.Steps {
 			rp := indexPath(indexPath("scenarios", i)+".steps", j) + ".request"
 			r := st.Request
@@ -115,37 +123,56 @@ func cloudEnvProblems(ps []Problem, d *Definition) []Problem {
 					ps = appendEnvRefs(ps, indexPath(hp, k), v)
 				}
 			}
+			ps = appendMapEnvRefs(ps, indexPath(sp+".steps", j)+".cookies", st.Cookies)
 		}
 	}
 	return ps
 }
 
+// appendMapEnvRefs appends the ${env.*} references in the values of m at
+// p, by sorted key.
+func appendMapEnvRefs(ps []Problem, p string, m map[string]string) []Problem {
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		ps = appendEnvRefs(ps, joinPath(p, k), m[k])
+	}
+	return ps
+}
+
 // appendEnvRefs appends a problem at path for each distinct ${env.*}
-// reference in src, as written and in source order. A reference runs from
-// ${ to the first }; without a } the rest of src is literal.
+// reference in src, as written and in source order.
 func appendEnvRefs(ps []Problem, path, src string) []Problem {
 	var seen map[string]bool
-	for i := 0; i < len(src); {
-		open := strings.Index(src[i:], "${")
-		if open < 0 {
-			break
-		}
-		open += i
-		end := strings.IndexByte(src[open+2:], '}')
-		if end < 0 {
-			break
-		}
-		end += open + 2
-		if ref := src[open : end+1]; strings.HasPrefix(ref[2:], "env.") && !seen[ref] {
+	forEachRef(src, func(open, end int) {
+		if ref := src[open:end]; strings.HasPrefix(ref[2:], "env.") && !seen[ref] {
 			if seen == nil {
 				seen = map[string]bool{}
 			}
 			seen[ref] = true
 			ps = append(ps, Problem{Path: path, Message: ref + cloudEnvMessage})
 		}
-		i = end + 1
-	}
+	})
 	return ps
+}
+
+// forEachRef calls fn with the bounds of each ${...} reference in src, in
+// source order: src[open:end] is the reference, braces included. A
+// reference runs from ${ to the first }; without a } the rest of src is
+// literal.
+func forEachRef(src string, fn func(open, end int)) {
+	for i := 0; i < len(src); {
+		open := strings.Index(src[i:], "${")
+		if open < 0 {
+			return
+		}
+		open += i
+		end := strings.IndexByte(src[open+2:], '}')
+		if end < 0 {
+			return
+		}
+		end += open + 3
+		fn(open, end)
+		i = end
+	}
 }
 
 // forEachJSONString calls fn with each string value in body, a JSON object

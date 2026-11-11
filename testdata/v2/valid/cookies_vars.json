@@ -1,0 +1,57 @@
+{
+  "schema_version": "2.0",
+  "name": "Preset cookies, vars and JSON data",
+  "virtual_users": 2,
+  "duration": "1m",
+  "cookies": {"locale": "en-GB", "consent": "all", "ab_test": "${variant}"},
+  "vars": {"variant": "B", "currency": "EUR", "api-version": "2"},
+  "scenarios": [
+    {
+      "name": "Shopper",
+      "weight": 1,
+      "auto_handle_cookies": true,
+      "cookies": {"locale": "de-DE", "__Host-cart": ""},
+      "vars": {"currency": "CHF", "_region": "eu"},
+      "data_config": {
+        "data_source": "users.json",
+        "data_content": "W3siZW1haWwiOiJ1c2VyQGV4YW1wbGUuY29tIn1d",
+        "data_format": "json",
+        "mode": "unique"
+      },
+      "steps": [
+        {
+          "name": "Home",
+          "cookies": {"session": "${session_id}", "theme": "v2-${theme}", "pref": "${pref | default:\"dark mode, v2\"}"},
+          "request": {"method": "GET", "url": "https://shop.example.com/?c=${currency}&v=${api-version}"}
+        },
+        {
+          "name": "Fresh session",
+          "clear_cookies": true,
+          "request": {"method": "GET", "url": "https://shop.example.com/login?user=${email}"}
+        },
+        {
+          "name": "Cart",
+          "clear_cookies": false,
+          "cookies": {},
+          "request": {"method": "GET", "url": "https://shop.example.com/cart"}
+        }
+      ]
+    },
+    {
+      "name": "Visitor",
+      "weight": 1,
+      "auto_handle_cookies": false,
+      "vars": {},
+      "data_config": {
+        "data_source": "visitors.csv",
+        "data_content": "bmFtZQphbGljZQo=",
+        "data_format": "csv",
+        "has_header": true,
+        "mode": "sequential"
+      },
+      "steps": [
+        {"name": "Home", "request": {"method": "GET", "url": "https://shop.example.com/?n=${name}"}}
+      ]
+    }
+  ]
+}

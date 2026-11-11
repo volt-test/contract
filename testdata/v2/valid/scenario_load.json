@@ -1,0 +1,66 @@
+{
+  "schema_version": "2.0",
+  "name": "Scenario pools next to the test-level load",
+  "virtual_users": 20,
+  "duration": "5m",
+  "ramp_up": "30s",
+  "scenarios": [
+    {
+      "name": "Browse",
+      "weight": 3,
+      "steps": [
+        {"name": "Home", "request": {"method": "GET", "url": "https://shop.example.com/"}}
+      ]
+    },
+    {
+      "name": "Search",
+      "weight": 1,
+      "steps": [
+        {"name": "Search", "request": {"method": "GET", "url": "https://shop.example.com/search?q=shoes"}}
+      ]
+    },
+    {
+      "name": "Checkout",
+      "start_at": "30s",
+      "load": {"type": "constant", "virtual_users": 5, "duration": "2m"},
+      "steps": [
+        {"name": "Cart", "request": {"method": "GET", "url": "https://shop.example.com/cart"}}
+      ]
+    },
+    {
+      "name": "Spike",
+      "weight": 0,
+      "start_at": "1m30s",
+      "load": {
+        "type": "stages",
+        "stages": [
+          {"duration": "30s", "target": 50},
+          {"duration": "1m", "target": 50},
+          {"duration": "30s", "target": 0}
+        ]
+      },
+      "steps": [
+        {"name": "Product", "request": {"method": "GET", "url": "https://shop.example.com/products/1"}}
+      ]
+    },
+    {
+      "name": "API",
+      "load": {"type": "rate", "rate": 100, "time_unit": "1s", "duration": "3m", "preallocated_vus": 10, "max_vus": 50},
+      "steps": [
+        {"name": "Stock", "request": {"method": "GET", "url": "https://shop.example.com/api/stock"}}
+      ]
+    },
+    {
+      "name": "Ramp API",
+      "start_at": "1m",
+      "load": {
+        "type": "ramping_rate",
+        "stages": [{"duration": "1m", "target": 20}, {"duration": "1m", "target": 0}],
+        "preallocated_vus": 2
+      },
+      "steps": [
+        {"name": "Prices", "request": {"method": "GET", "url": "https://shop.example.com/api/prices"}}
+      ]
+    }
+  ]
+}

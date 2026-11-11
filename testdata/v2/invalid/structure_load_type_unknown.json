@@ -2,7 +2,7 @@
   "schema_version": "2.0",
   "name": "Invalid load",
   "load": {
-    "type": "constant",
+    "type": "burst",
     "rate": 500,
     "time_unit": "1s",
     "duration": "5m",

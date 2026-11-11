@@ -55,6 +55,7 @@ var unknownFixtures = map[string][]string{
 	"unknown_step_timeout.json":              {"scenarios[0].steps[0].timeout"},
 	"unknown_load_start_rate.json":           {"load.start_rate"},
 	"unknown_load_stage.json":                {"load.stages[0].rate"},
+	"unknown_pool_ramp_up.json":              {"scenarios[1].load.ramp_up"},
 }
 
 func TestV2UnknownFields(t *testing.T) {
@@ -298,12 +299,12 @@ func TestV2Problems(t *testing.T) {
 		{"data_config", func(m map[string]any) {
 			scenario0(m)["data_config"] = map[string]any{"data_format": "xlsx", "mode": "shuffle"}
 		}, []string{
-			`scenarios[0].data_config.data_format: must be one of "csv", got "xlsx"`,
+			`scenarios[0].data_config.data_format: must be one of "csv", "json", got "xlsx"`,
 			`scenarios[0].data_config.mode: must be one of "sequential", "random", "unique", got "shuffle"`,
 			"scenarios[0].data_config.data_source: is required",
 		}},
 		{"empty data_config", func(m map[string]any) { scenario0(m)["data_config"] = map[string]any{} }, []string{
-			`scenarios[0].data_config.data_format: is required (one of "csv")`,
+			`scenarios[0].data_config.data_format: is required (one of "csv", "json")`,
 			`scenarios[0].data_config.mode: is required (one of "sequential", "random", "unique")`,
 			"scenarios[0].data_config.data_source: is required",
 		}},
@@ -573,7 +574,7 @@ func TestV2RoundTrip(t *testing.T) {
 		TLS: &definition.TLSOptions{InsecureSkipVerify: true, MinVersion: "1.3", ClientCert: "certs/client.pem",
 			ClientKey: "certs/client-key.pem", CACert: "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n"},
 		Scenarios: []definition.Scenario{{
-			Name: "s", Description: "x", Weight: 3, ThinkTime: "1s", AutoHandleCookies: true,
+			Name: "s", Description: "x", Weight: 3, ThinkTime: "1s", AutoHandleCookies: &yes,
 			Thresholds: []definition.ThresholdConfig{{Expr: "iterations > 1", AbortOnFail: true}},
 			DataConfig: &definition.DataConfig{DataSource: "a.csv", DataContent: "YQ==", DataFormat: "csv", HasHeader: true, Mode: "unique"},
 			Steps: []definition.Step{{

@@ -54,7 +54,9 @@ type Definition struct {
 	Stages []Stage `json:"stages,omitempty"`
 	// Arrival-rate load: iterations start at a set rate, whatever the
 	// response times. Use instead of virtual_users, duration, ramp_up and
-	// stages.
+	// stages. Only types "rate" and "ramping_rate" apply here. Leave the
+	// whole test-level load model out when every load scenario has its own
+	// load.
 	Load *Load `json:"load,omitempty" contract:"v2"`
 
 	// Timeout for each HTTP request, e.g. "30s".
@@ -81,6 +83,23 @@ type Definition struct {
 	HTTP *HTTPOptions `json:"http,omitempty" contract:"v2"`
 	// TLS options for every request to an https URL.
 	TLS *TLSOptions `json:"tls,omitempty" contract:"v2"`
+	// Preset cookies, by name. A name is an HTTP token (no spaces, "=", ";"
+	// or other separators) and is sent as written. A value is cookie-octets
+	// (no space, '"', ",", ";", "\", control character or non-ASCII) outside
+	// ${variable} references; the engine checks the resolved value when it
+	// sends the request. CR, LF and NUL are refused anywhere. A scenario's or a step's
+	// cookie of the same name replaces it. How preset cookies interact with
+	// the cookie jar, a step's Cookie header and clear_cookies, and which
+	// hosts receive them, is defined by the engine's HTTP options
+	// documentation.
+	Cookies map[string]string `json:"cookies,omitempty" contract:"v2"`
+	// Variables every virtual user starts with, readable as ${name}, at the
+	// lowest precedence: a CSV column, an extracted value (setup globals
+	// included) or a built-in variable of the same name wins. A name is
+	// ASCII letters, digits, "_" and "-", and not "env" or "fake". A value
+	// may contain ${...} references; when they resolve is defined by the
+	// engine. A scenario's vars of the same name replace these.
+	Vars map[string]string `json:"vars,omitempty" contract:"v2"`
 
 	// Weights repeats the scenario weights (v1 only).
 	Weights []int `json:"weights,omitempty" contract:"v1,loose" jsonschema:"-"`
@@ -237,33 +256,45 @@ type Stage struct {
 	Target int `json:"target,omitempty" jsonschema:"minimum=0"`
 }
 
-// Load is an arrival-rate load profile.
+// Load is a load profile: an arrival rate for the test or a scenario
+// (types rate and ramping_rate), or a scenario's own pool of virtual users
+// (types constant and stages).
 type Load struct {
 	// "rate" starts iterations at a constant rate for duration;
-	// "ramping_rate" moves the rate through stages.
-	Type LoadType `json:"type" jsonschema:"required,enum=rate,enum=ramping_rate"`
+	// "ramping_rate" moves the rate through stages. On a scenario only,
+	// "constant" runs virtual_users for duration and "stages" moves the
+	// number of virtual users through stages.
+	Type LoadType `json:"type" jsonschema:"required,enum=rate,enum=ramping_rate,enum=constant,enum=stages"`
 	// Type rate: iterations started per time_unit (at least 1).
 	Rate int `json:"rate,omitempty" jsonschema:"minimum=0"`
-	// The period rate and stage targets count over, e.g. "1m" (default "1s").
+	// Types rate and ramping_rate: the period rate and stage targets count
+	// over, e.g. "1m" (default "1s").
 	TimeUnit string `json:"time_unit,omitempty"`
-	// Type rate: how long the test runs, e.g. "5m".
+	// Types rate and constant: how long the load runs, e.g. "5m".
 	Duration string `json:"duration,omitempty"`
-	// Type ramping_rate: the rate starts at 0 and moves linearly to each
-	// stage's target over that stage's duration.
+	// Types ramping_rate and stages: the rate, or the number of virtual
+	// users, starts at 0 and moves linearly to each stage's target over that
+	// stage's duration.
 	Stages []RateStage `json:"stages,omitempty"`
-	// Virtual users started before the test begins (at least 1).
-	PreallocatedVUs int `json:"preallocated_vus" jsonschema:"required,minimum=1"`
-	// Most virtual users the test may run (default preallocated_vus). When
-	// all are busy, an iteration that is due is dropped and counted.
+	// Type constant: the scenario's virtual users (at least 1).
+	VirtualUsers int `json:"virtual_users,omitempty" jsonschema:"minimum=0"`
+	// Types rate and ramping_rate: virtual users started before the load
+	// begins (at least 1).
+	PreallocatedVUs int `json:"preallocated_vus,omitempty" jsonschema:"minimum=0"`
+	// Types rate and ramping_rate: most virtual users the load may run
+	// (default preallocated_vus). When all are busy, an iteration that is
+	// due is dropped and counted.
 	MaxVUs int `json:"max_vus,omitempty" jsonschema:"minimum=0"`
 }
 
-// RateStage is one stage of a ramping_rate load profile. The rate moves
-// linearly from the previous stage's target (0 for the first) to Target.
+// RateStage is one stage of a ramping_rate or stages load profile. The
+// value moves linearly from the previous stage's target (0 for the first)
+// to Target.
 type RateStage struct {
 	// How long the stage lasts, e.g. "1m".
 	Duration string `json:"duration" jsonschema:"required,minLength=1"`
-	// Iterations started per time_unit at the end of the stage.
+	// Type ramping_rate: iterations started per time_unit at the end of the
+	// stage. Type stages: virtual users at the end of the stage.
 	Target int `json:"target,omitempty" jsonschema:"minimum=0"`
 }
 
@@ -293,16 +324,18 @@ type Scenario struct {
 	// Free-text description of the scenario.
 	Description string `json:"description,omitempty"`
 	// Relative chance that a virtual user runs this scenario. Not allowed
-	// on a run_once or teardown scenario.
+	// on a run_once or teardown scenario, or with load.
 	Weight int `json:"weight,omitempty" jsonschema:"minimum=0"`
 	// Default think_time for each step that sets none: a duration or a
 	// range such as "1s-3s".
 	ThinkTime string `json:"think_time,omitempty"`
-	// Keep cookies between the steps of a run.
-	AutoHandleCookies bool `json:"auto_handle_cookies,omitempty"`
+	// Keep cookies between the steps of a run. On by default for
+	// schema_version 2.x, where false opts out; off by default in v1. An
+	// explicit false is kept when the definition is written back.
+	AutoHandleCookies *bool `json:"auto_handle_cookies,omitempty"`
 	// Steps, run in order.
 	Steps []Step `json:"steps" jsonschema:"required,minItems=1"`
-	// CSV data whose columns fill ${column} variables.
+	// CSV or JSON data whose columns or keys fill ${name} variables.
 	DataConfig *DataConfig `json:"data_config,omitempty"`
 	// Pass/fail rules for this scenario, e.g. "iteration_duration_p95 < 5s".
 	Thresholds []ThresholdConfig `json:"thresholds,omitempty" contract:"v2"`
@@ -314,26 +347,50 @@ type Scenario struct {
 	// setup variables readable, e.g. to delete seeded data. Takes no weight
 	// and is never picked for the load.
 	Teardown bool `json:"teardown,omitempty" contract:"v2"`
+	// The scenario's own load, run alongside the test-level load model and
+	// independent of it: its own virtual users ("constant" or "stages") or
+	// arrival rate ("rate" or "ramping_rate"). The scenario takes no weight
+	// and is never picked by the test-level virtual users. Not allowed on a
+	// run_once or teardown scenario. On VoltTest Cloud the backend refuses,
+	// before the run starts, a pool whose peak in a region is below that
+	// region's node count, the peak being virtual_users for constant, the
+	// highest stage target for stages, and max_vus (or preallocated_vus when
+	// max_vus is absent) for rate and ramping_rate.
+	Load *Load `json:"load,omitempty" contract:"v2"`
+	// How long after the load starts the scenario's own load starts, e.g.
+	// "30s" (greater than zero, no upper bound; absent starts it with the
+	// load). Requires load. A run lasts until every scenario ends: the
+	// latest start_at plus pool length over the pools, and the test-level
+	// model's length for the scenarios that share it.
+	StartAt string `json:"start_at,omitempty" contract:"v2"`
+	// Preset cookies for the scenario, by name, as for the test-level
+	// cookies; one of the same name replaces the test's.
+	Cookies map[string]string `json:"cookies,omitempty" contract:"v2"`
+	// Variables for the virtual users running the scenario, as for the
+	// test-level vars; one of the same name replaces the test's.
+	Vars map[string]string `json:"vars,omitempty" contract:"v2"`
 }
 
 // IsLoad reports whether the scenario takes part in the load: it is
-// neither a run_once nor a teardown scenario.
+// neither a run_once nor a teardown scenario. A scenario with its own Load
+// is a load scenario.
 func (s Scenario) IsLoad() bool { return !s.RunOnce && !s.Teardown }
 
 // DataConfig is a scenario's data source.
 type DataConfig struct {
-	// Name or path of the CSV file.
+	// Name or path of the data file.
 	DataSource string `json:"data_source,omitempty"`
-	// Base64-encoded content of the CSV file.
+	// Base64-encoded content of the data file.
 	DataContent string `json:"data_content,omitempty"`
 	// DataDownloadURL is dispatch-only: the VoltTest backend sets it when it
 	// sends a run to the engines. It counts as a data source in v2. The
 	// backend must strip any user-supplied value before calling Parse on a
 	// submitted definition. The published schema leaves it out.
 	DataDownloadURL string `json:"data_download_url,omitempty" contract:"loose" jsonschema:"-"`
-	// File format.
-	DataFormat string `json:"data_format,omitempty" jsonschema:"required,enum=csv"`
-	// The first row holds column names.
+	// File format: "csv", or "json" (an array of objects, one per row,
+	// whose keys name the variables).
+	DataFormat string `json:"data_format,omitempty" jsonschema:"required,enum=csv,enum=json"`
+	// The first row holds column names. CSV only.
 	HasHeader bool `json:"has_header,omitempty"`
 	// How virtual users take rows: in order, at random, or each row once.
 	Mode string `json:"mode,omitempty" jsonschema:"required,enum=sequential,enum=random,enum=unique"`
@@ -380,6 +437,13 @@ type Step struct {
 	// With "binary" regex extractors and body checks read the raw bytes,
 	// and json and html checks and extractors are not allowed.
 	ResponseType ResponseType `json:"response_type,omitempty" contract:"v2"`
+	// Preset cookies for this step, by name, as for the test-level cookies;
+	// one of the same name replaces the scenario's or the test's.
+	Cookies map[string]string `json:"cookies,omitempty" contract:"v2"`
+	// Drop the cookies the virtual user kept from earlier responses before
+	// this step's request (default false). Not allowed when the scenario's
+	// auto_handle_cookies is false, where it has no effect.
+	ClearCookies bool `json:"clear_cookies,omitempty" contract:"v2"`
 }
 
 // ResponseType is how a step reads its response body.

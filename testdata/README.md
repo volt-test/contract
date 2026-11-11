@@ -51,6 +51,16 @@ the v1 engines read and loses nothing on a round trip.
   next to string `Host` and `Content-Type` headers that v1 keeps;
   `TestV1DropsHTTPTier2Keys` checks it, and the keys with the wrong JSON
   type and other cases.
+  `scenario_load_cookies_ignored.json` does the same for a scenario's
+  `load` and `start_at`, `cookies` at every level, a step's
+  `clear_cookies` and `vars` at both levels, with values v2 rejects (a
+  `constant` pool of 0 virtual users, an all-zero `stages` pool, a weight
+  next to a `load`, a negative `start_at`, bad cookie and variable names
+  and values), next to `data_format: "json"` with `has_header`, which v1
+  keeps as written; `TestV1DropsScenarioLoadCookieKeys` checks it, and the
+  keys with the wrong JSON type and other cases. It sets
+  `auto_handle_cookies: true`, not `false`, so its v0.4.0 recording also
+  holds for the current code.
 
 Every `*_ignored.json` fixture keeps the right JSON type for each value:
 `TestV1RewriteMatchesDirectDecode` decodes every v1 fixture with plain
@@ -140,6 +150,17 @@ one, contains "secret".
   `TestCloudProblemsInlineBinary` in `definition/cloud_test.go` checks
   them. The other accepted and rejected cases are in
   `definition/http_tier2_test.go`.
+  `scenario_load.json` has a test-level constant load for two weighted
+  scenarios next to one scenario `load` of each type, two with
+  `start_at` and one with `weight: 0`; `scenario_load_only.json` has no
+  test-level load model, since every load scenario has its own `load`,
+  next to a `run_once` scenario. `cookies_vars.json` has `cookies` at
+  every level (a templated value, one with literal text around a
+  reference, one whose reference holds a space, a comma and quotes, an
+  empty one, `{}`), `vars` at both levels (`{}` too), `clear_cookies` true
+  and false, `auto_handle_cookies` true and false (the latter in a
+  scenario without `clear_cookies`), and a JSON and a CSV data file. The other accepted cases are in `TestScenarioLoadRules` and
+  `TestCookieVarRules` in `definition/scenario_load_test.go`.
 - `invalid/`: definitions `Parse` rejects, run through the schema as well.
   - `unknown_*`: unknown or v1-only keys added to a valid definition. The
     expected paths are listed in `definition/parse_v2_test.go`.
@@ -182,6 +203,30 @@ one, contains "secret".
     `structure_load_none.json` and `structure_load_both.json`.
     `unknown_load_start_rate.json` (no `start_rate`) and
     `unknown_load_stage.json` are `unknown_*` fixtures.
+    `structure_load_constant_top_level.json` and
+    `structure_load_stages_top_level.json` use a scenario-only type at the
+    top level.
+  - A scenario's own load, `start_at`, cookies, variables and data
+    formats have the families `structure_pool_*`, `type_pool_*`,
+    `structure_start_at_*`, `type_start_at_*`, `structure_cookies_*`,
+    `type_cookies_*`, `type_clear_cookies_*`, `structure_vars_*`,
+    `type_vars_*` and `structure_data_format_*`:
+    `scenarioLoadFixtureProblems` in `definition/scenario_load_test.go`
+    lists the problems each must produce, and the test fails on an
+    unlisted fixture of these families. They cover a `constant` pool of 0
+    virtual users (written and absent), an all-zero `stages` pool, keys of
+    another load type, an arrival-rate pool without `preallocated_vus`, an
+    unknown type, a pool with a weight, on a `run_once` and on a
+    `teardown` scenario, a test-level model no scenario uses and one
+    missing where a scenario needs it, `start_at` without a `load`, zero
+    and malformed, bad cookie names and values at each level, bad variable
+    names, `has_header` with `"json"`, an unknown `data_format`, and values
+    of the wrong JSON type. `structure_cookies_value_*` hold a space, a
+    comma, a quote, a backslash and non-ASCII in a value's literal text;
+    `structure_clear_cookies_without_auto.json` has `clear_cookies` in a
+    scenario with `auto_handle_cookies: false`; `structure_vars_env.json`
+    and `structure_vars_fake.json` use the reserved names. `unknown_pool_ramp_up.json` (a scenario load
+    takes no `ramp_up`) is an `unknown_*` fixture.
   - Setup and teardown scenarios have the families `structure_run_once_*`,
     `structure_teardown_*`, `type_run_once_*` and `type_teardown_*`:
     `setupTeardownFixtureProblems` in `definition/setup_teardown_test.go`
@@ -246,6 +291,19 @@ could be arrays, so that later type changes can be checked against it:
   `v1_header_array.marshal.json` are its `V1TypeProblems` and its
   `json.Marshal` output. `TestV1HeaderArrayStaysTypeProblem` compares
   against them.
+- `v1_auto_handle_cookies.json` holds v1 definitions with
+  `auto_handle_cookies` absent, `true`, `false`, `null`, of every wrong
+  JSON type, in other cases and repeated. `v1_auto_handle_cookies.results.json`
+  is what the v0.4.0 code made of each, when the field was a `bool`: the
+  problems of the error, or the `V1TypeProblems` and `json.Marshal`
+  output. `TestV1AutoHandleCookiesRecorded` compares against it.
+
+The field became a `*bool` after v0.4.0, so an explicit
+`"auto_handle_cookies":false` now survives `json.Marshal`: the v1
+recordings of the seven fixtures that write one gained it, and that is
+their only change. `TestV1AutoHandleCookiesRecorded` compares marshal
+output without it, and `TestV1RecordedFalseReadsTheSame` checks that a v1
+reader decodes each of those recordings the same with and without it.
 
 Re-record (`go test ./definition -run 'TestMarshalUnchanged|TestV1HeaderArray' -update-recorded`)
 only for an intended change, and say so in the pull request.

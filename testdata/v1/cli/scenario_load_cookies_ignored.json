@@ -1,0 +1,61 @@
+{
+  "name": "v1 definition with scenario load, cookies and vars",
+  "virtual_users": 3,
+  "duration": "10s",
+  "cookies": {"a b": "x;y", "": "\r\n"},
+  "vars": {" ": "blank key", "host": "${env.HOST}"},
+  "scenarios": [
+    {
+      "name": "Pool",
+      "weight": 2,
+      "think_time": "1s",
+      "auto_handle_cookies": true,
+      "load": {
+        "type": "constant",
+        "virtual_users": 0,
+        "duration": "0s",
+        "preallocated_vus": 4
+      },
+      "start_at": "-5s",
+      "cookies": {"session;": "abc"},
+      "vars": {"": "x"},
+      "data_config": {
+        "data_source": "users.json",
+        "data_content": "W3siZW1haWwiOiJ1c2VyQGV4YW1wbGUuY29tIn1d",
+        "data_format": "json",
+        "has_header": true,
+        "mode": "random"
+      },
+      "steps": [
+        {
+          "name": "Home",
+          "clear_cookies": true,
+          "cookies": {"=": "v"},
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/",
+            "header": {"Accept": "text/html"}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Staged",
+      "weight": 1,
+      "load": {
+        "type": "stages",
+        "stages": [{"duration": "1m", "target": 0}, {"duration": "30s"}]
+      },
+      "steps": [
+        {
+          "name": "Cart",
+          "clear_cookies": false,
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/cart"
+          }
+        }
+      ]
+    }
+  ]
+}

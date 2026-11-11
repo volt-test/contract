@@ -16,9 +16,10 @@
 // A v1 definition (no schema_version, or 1, "1", "1.0" or null) is read the
 // way the v1 readers read it: unknown keys are ignored, keys match
 // case-insensitively, and v2-only keys (contract:"v2", such as
-// target.base_url, thresholds, expected_statuses, http, tls, load, a
-// scenario's run_once and teardown, a step's checks, follow_redirects,
-// max_redirects, once_per_vu, discard_body and response_type, a request's
+// target.base_url, thresholds, expected_statuses, http, tls, load,
+// cookies and vars at every level, a scenario's run_once, teardown, load
+// and start_at, a step's checks, follow_redirects, max_redirects,
+// once_per_vu, discard_body, response_type and clear_cookies, a request's
 // body_type, body_json, fields, files, body_base64 and timeout, and an
 // extractor's required, on_fail and pick) are dropped unread. A request's
 // headers stay strings in v1: an array value is a loose type problem, as
@@ -257,14 +258,50 @@
 // One of: non-empty stages; virtual_users (at least 1) with optional
 // duration and ramp_up; or load alone. Without duration each virtual user
 // runs its scenario once. A duration that is present must be greater than
-// zero, and so must every stage duration.
+// zero, and so must every stage duration. When every load scenario has its
+// own Load, there is no test-level model (UsesTestLoad is false), and
+// Parse refuses each of those keys that holds a value other than its zero
+// value.
 //
 // Load is an arrival-rate (open) model. Type LoadRate needs rate and
 // duration; LoadRampingRate needs stages, at least one with a target above
 // 0, and takes neither. Rates count iterations per time_unit; "" means 1s.
 // preallocated_vus is required, and max_vus 0 means preallocated_vus. Parse
 // leaves both defaults to the reader. load joined schema_version "2.0"
-// while it is a preview.
+// while it is a preview. The test-level load takes these two types only.
+//
+// # Scenario load (v2)
+//
+// A Scenario with a Load runs its own pool alongside the test-level model,
+// independent of it, and is never picked by weight. Its Load takes the
+// arrival-rate types, LoadConstant (virtual_users of at least 1 and
+// duration) or LoadStages (stages, at least one with a target above 0);
+// there is no pool of 0 virtual users. StartAt delays the pool's start
+// from the start of the load and needs a Load. Parse refuses a Load on a
+// run_once or teardown scenario and a weight next to a Load. On VoltTest
+// Cloud the backend refuses, before the run starts, a pool whose peak in a
+// region is below that region's node count, the peak being virtual_users
+// for LoadConstant, the highest stage target for LoadStages, and max_vus
+// (or preallocated_vus when max_vus is absent) for LoadRate and
+// LoadRampingRate. CloudProblems does not refuse pools. A scenario's load
+// and start_at joined schema_version "2.0" while it is a preview.
+//
+// # Cookies and variables (v2)
+//
+// Cookies preset cookies on the test, a scenario or a step, the lower
+// level replacing a cookie of the same name; names are HTTP tokens and
+// values are cookie-octets outside ${...} references, with no CR, LF or
+// NUL anywhere. How presets interact with the cookie jar, a Cookie header
+// and ClearCookies is the engine's to define. A Step's ClearCookies drops
+// the cookies kept from earlier responses before its request and is
+// refused where the scenario's AutoHandleCookies is false. Vars preset
+// variables on the test or a scenario at the lowest precedence (CSV
+// columns, extracted values and built-ins win); names are ASCII letters,
+// digits, "_" and "-", other than "env" and "fake". AutoHandleCookies is a
+// *bool so that an explicit false survives Marshal; it is on by default
+// for schema_version 2.x and off in v1. DataConfig takes data_format
+// "json" as well as "csv" in v2, has_header with "csv" only. These joined
+// schema_version "2.0" while it is a preview.
 //
 // # Setup and teardown (v2)
 //
@@ -352,8 +389,8 @@
 //
 // CloudProblems lists what VoltTest Cloud refuses in a definition Parse
 // accepts, for a run on a given number of nodes: tls file paths, binary
-// request content (files and body_base64), ${env.*} references, and
-// run_once and teardown scenarios, in that order. It
-// returns nil for v1. The README section "VoltTest Cloud" gives the paths
+// request content (files and body_base64), ${env.*} references (cookie
+// and var values included), and run_once and teardown scenarios, in that
+// order. It returns nil for v1. The README section "VoltTest Cloud" gives the paths
 // and messages.
 package definition

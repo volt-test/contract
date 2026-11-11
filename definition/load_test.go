@@ -14,7 +14,7 @@ import (
 // problems Parse reports, in order.
 var loadFixtureProblems = map[string][]string{
 	"structure_load_type_missing.json":                  {`load.type: is required (one of "rate", "ramping_rate")`},
-	"structure_load_type_unknown.json":                  {`load.type: must be one of "rate", "ramping_rate", got "constant"`},
+	"structure_load_type_unknown.json":                  {`load.type: must be one of "rate", "ramping_rate", got "burst"`},
 	"structure_load_time_unit_zero.json":                {`load.time_unit: must be greater than zero`},
 	"structure_load_preallocated_missing.json":          {`load.preallocated_vus: is required (at least 1)`},
 	"structure_load_max_vus_below_preallocated.json":    {`load.max_vus: must be at least preallocated_vus (200), got 100`},
@@ -35,6 +35,10 @@ var loadFixtureProblems = map[string][]string{
 		"virtual_users: cannot be combined with stages",
 		"duration: cannot be combined with stages",
 	},
+	"structure_load_constant_top_level.json": {`load.type: "constant" is only valid on a scenario's load; ` +
+		`at the top level use virtual_users and duration, or stages`},
+	"structure_load_stages_top_level.json": {`load.type: "stages" is only valid on a scenario's load; ` +
+		`at the top level use virtual_users and duration, or stages`},
 	"type_load_string.json":      {`load: must be an object`},
 	"type_load_null.json":        {`load: must not be null`},
 	"type_load_rate_string.json": {`load.rate: must be an integer`},

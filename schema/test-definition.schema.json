@@ -181,25 +181,46 @@
           ]
         }
       ],
+      "dependentSchemas": {
+        "has_header": {
+          "anyOf": [
+            {
+              "properties": {
+                "has_header": {
+                  "const": false
+                }
+              }
+            },
+            {
+              "properties": {
+                "data_format": {
+                  "const": "csv"
+                }
+              }
+            }
+          ]
+        }
+      },
       "properties": {
         "data_source": {
           "type": "string",
-          "description": "Name or path of the CSV file."
+          "description": "Name or path of the data file."
         },
         "data_content": {
           "type": "string",
-          "description": "Base64-encoded content of the CSV file."
+          "description": "Base64-encoded content of the data file."
         },
         "data_format": {
           "type": "string",
           "enum": [
-            "csv"
+            "csv",
+            "json"
           ],
-          "description": "File format."
+          "description": "File format: \"csv\", or \"json\" (an array of objects, one per row,\nwhose keys name the variables)."
         },
         "has_header": {
           "type": "boolean",
-          "description": "The first row holds column names."
+          "description": "The first row holds column names. CSV only."
         },
         "mode": {
           "type": "string",
@@ -217,7 +238,7 @@
         "data_format",
         "mode"
       ],
-      "description": "A CSV data source. Each virtual user takes rows according to mode."
+      "description": "A CSV or JSON data source. Each virtual user takes rows according to mode."
     },
     "Extract": {
       "dependentSchemas": {
@@ -448,11 +469,18 @@
             },
             "stages": {
               "maxItems": 0
+            },
+            "virtual_users": {
+              "maximum": 0
+            },
+            "preallocated_vus": {
+              "minimum": 1
             }
           },
           "required": [
             "rate",
-            "duration"
+            "duration",
+            "preallocated_vus"
           ]
         },
         {
@@ -478,6 +506,86 @@
                 ]
               },
               "minItems": 1
+            },
+            "virtual_users": {
+              "maximum": 0
+            },
+            "preallocated_vus": {
+              "minimum": 1
+            }
+          },
+          "required": [
+            "stages",
+            "preallocated_vus"
+          ]
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "constant"
+            },
+            "virtual_users": {
+              "minimum": 1
+            },
+            "duration": {
+              "minLength": 1
+            },
+            "rate": {
+              "maximum": 0
+            },
+            "time_unit": {
+              "maxLength": 0
+            },
+            "stages": {
+              "maxItems": 0
+            },
+            "preallocated_vus": {
+              "maximum": 0
+            },
+            "max_vus": {
+              "maximum": 0
+            }
+          },
+          "required": [
+            "virtual_users",
+            "duration"
+          ]
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "stages"
+            },
+            "stages": {
+              "contains": {
+                "properties": {
+                  "target": {
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "target"
+                ]
+              },
+              "minItems": 1
+            },
+            "rate": {
+              "maximum": 0
+            },
+            "time_unit": {
+              "maxLength": 0
+            },
+            "duration": {
+              "maxLength": 0
+            },
+            "virtual_users": {
+              "maximum": 0
+            },
+            "preallocated_vus": {
+              "maximum": 0
+            },
+            "max_vus": {
+              "maximum": 0
             }
           },
           "required": [
@@ -490,9 +598,11 @@
           "type": "string",
           "enum": [
             "rate",
-            "ramping_rate"
+            "ramping_rate",
+            "constant",
+            "stages"
           ],
-          "description": "\"rate\" starts iterations at a constant rate for duration;\n\"ramping_rate\" moves the rate through stages."
+          "description": "\"rate\" starts iterations at a constant rate for duration;\n\"ramping_rate\" moves the rate through stages. On a scenario only,\n\"constant\" runs virtual_users for duration and \"stages\" moves the\nnumber of virtual users through stages."
         },
         "rate": {
           "type": "integer",
@@ -501,37 +611,41 @@
         },
         "time_unit": {
           "type": "string",
-          "description": "The period rate and stage targets count over, e.g. \"1m\" (default \"1s\")."
+          "description": "Types rate and ramping_rate: the period rate and stage targets count\nover, e.g. \"1m\" (default \"1s\")."
         },
         "duration": {
           "type": "string",
-          "description": "Type rate: how long the test runs, e.g. \"5m\"."
+          "description": "Types rate and constant: how long the load runs, e.g. \"5m\"."
         },
         "stages": {
           "items": {
             "$ref": "#/$defs/RateStage"
           },
           "type": "array",
-          "description": "Type ramping_rate: the rate starts at 0 and moves linearly to each\nstage's target over that stage's duration."
+          "description": "Types ramping_rate and stages: the rate, or the number of virtual\nusers, starts at 0 and moves linearly to each stage's target over that\nstage's duration."
+        },
+        "virtual_users": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Type constant: the scenario's virtual users (at least 1)."
         },
         "preallocated_vus": {
           "type": "integer",
-          "minimum": 1,
-          "description": "Virtual users started before the test begins (at least 1)."
+          "minimum": 0,
+          "description": "Types rate and ramping_rate: virtual users started before the load\nbegins (at least 1)."
         },
         "max_vus": {
           "type": "integer",
           "minimum": 0,
-          "description": "Most virtual users the test may run (default preallocated_vus). When\nall are busy, an iteration that is due is dropped and counted."
+          "description": "Types rate and ramping_rate: most virtual users the load may run\n(default preallocated_vus). When all are busy, an iteration that is\ndue is dropped and counted."
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "type",
-        "preallocated_vus"
+        "type"
       ],
-      "description": "An arrival-rate load profile: iterations start at a set rate, picked up by idle virtual users."
+      "description": "A load profile: an arrival rate (rate, ramping_rate), where iterations start at a set rate and are picked up by idle virtual users, or, on a scenario only, the scenario's own virtual users (constant, stages)."
     },
     "RateStage": {
       "properties": {
@@ -543,7 +657,7 @@
         "target": {
           "type": "integer",
           "minimum": 0,
-          "description": "Iterations started per time_unit at the end of the stage."
+          "description": "Type ramping_rate: iterations started per time_unit at the end of the\nstage. Type stages: virtual users at the end of the stage."
         }
       },
       "additionalProperties": false,
@@ -551,7 +665,7 @@
       "required": [
         "duration"
       ],
-      "description": "One stage of a ramping_rate load profile. The rate starts at 0 and moves linearly to each stage's target over that stage's duration."
+      "description": "One stage of a ramping_rate or stages load profile. The rate or the number of virtual users starts at 0 and moves linearly to each stage's target over that stage's duration."
     },
     "RegionWeight": {
       "properties": {
@@ -868,6 +982,43 @@
         }
       ],
       "dependentSchemas": {
+        "auto_handle_cookies": {
+          "anyOf": [
+            {
+              "properties": {
+                "auto_handle_cookies": {
+                  "const": true
+                }
+              }
+            },
+            {
+              "properties": {
+                "steps": {
+                  "items": {
+                    "properties": {
+                      "clear_cookies": {
+                        "const": false
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "load": {
+          "properties": {
+            "weight": {
+              "maximum": 0
+            },
+            "run_once": {
+              "const": false
+            },
+            "teardown": {
+              "const": false
+            }
+          }
+        },
         "run_once": {
           "anyOf": [
             {
@@ -895,6 +1046,22 @@
                   }
                 }
               }
+            }
+          ]
+        },
+        "start_at": {
+          "anyOf": [
+            {
+              "properties": {
+                "start_at": {
+                  "maxLength": 0
+                }
+              }
+            },
+            {
+              "required": [
+                "load"
+              ]
             }
           ]
         },
@@ -939,7 +1106,7 @@
         "weight": {
           "type": "integer",
           "minimum": 0,
-          "description": "Relative chance that a virtual user runs this scenario. Not allowed\non a run_once or teardown scenario."
+          "description": "Relative chance that a virtual user runs this scenario. Not allowed\non a run_once or teardown scenario, or with load."
         },
         "think_time": {
           "type": "string",
@@ -947,7 +1114,7 @@
         },
         "auto_handle_cookies": {
           "type": "boolean",
-          "description": "Keep cookies between the steps of a run."
+          "description": "Keep cookies between the steps of a run. On by default for\nschema_version 2.x, where false opts out; off by default in v1. An\nexplicit false is kept when the definition is written back."
         },
         "steps": {
           "items": {
@@ -959,7 +1126,7 @@
         },
         "data_config": {
           "$ref": "#/$defs/DataConfig",
-          "description": "CSV data whose columns fill ${column} variables."
+          "description": "CSV or JSON data whose columns or keys fill ${name} variables."
         },
         "thresholds": {
           "items": {
@@ -975,6 +1142,41 @@
         "teardown": {
           "type": "boolean",
           "description": "Run the scenario once after every virtual user has stopped, with the\nsetup variables readable, e.g. to delete seeded data. Takes no weight\nand is never picked for the load."
+        },
+        "load": {
+          "$ref": "#/$defs/Load",
+          "description": "The scenario's own load, run alongside the test-level load model and\nindependent of it: its own virtual users (\"constant\" or \"stages\") or\narrival rate (\"rate\" or \"ramping_rate\"). The scenario takes no weight\nand is never picked by the test-level virtual users. Not allowed on a\nrun_once or teardown scenario. On VoltTest Cloud the backend refuses,\nbefore the run starts, a pool whose peak in a region is below that\nregion's node count, the peak being virtual_users for constant, the\nhighest stage target for stages, and max_vus (or preallocated_vus when\nmax_vus is absent) for rate and ramping_rate."
+        },
+        "start_at": {
+          "type": "string",
+          "description": "How long after the load starts the scenario's own load starts, e.g.\n\"30s\" (greater than zero, no upper bound; absent starts it with the\nload). Requires load. A run lasts until every scenario ends: the\nlatest start_at plus pool length over the pools, and the test-level\nmodel's length for the scenarios that share it."
+        },
+        "cookies": {
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^(?:[\\x21\\x23-\\x2B\\x2D-\\x3A\\x3C-\\x5B\\x5D-\\x7E]|\\$\\{[^}\\r\\n\\x00]*\\})*$"
+          },
+          "propertyNames": {
+            "pattern": "^[!#$%\u0026'*+.^_`|~0-9A-Za-z-]+$"
+          },
+          "type": "object",
+          "description": "Preset cookies for the scenario, by name, as for the test-level\ncookies; one of the same name replaces the test's."
+        },
+        "vars": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "propertyNames": {
+            "not": {
+              "enum": [
+                "env",
+                "fake"
+              ]
+            },
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "type": "object",
+          "description": "Variables for the virtual users running the scenario, as for the\ntest-level vars; one of the same name replaces the test's."
         }
       },
       "additionalProperties": false,
@@ -1072,6 +1274,21 @@
           ],
           "type": "string",
           "description": "How the response body is read: \"text\" (the default) or \"binary\".\nWith \"binary\" regex extractors and body checks read the raw bytes,\nand json and html checks and extractors are not allowed."
+        },
+        "cookies": {
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^(?:[\\x21\\x23-\\x2B\\x2D-\\x3A\\x3C-\\x5B\\x5D-\\x7E]|\\$\\{[^}\\r\\n\\x00]*\\})*$"
+          },
+          "propertyNames": {
+            "pattern": "^[!#$%\u0026'*+.^_`|~0-9A-Za-z-]+$"
+          },
+          "type": "object",
+          "description": "Preset cookies for this step, by name, as for the test-level cookies;\none of the same name replaces the scenario's or the test's."
+        },
+        "clear_cookies": {
+          "type": "boolean",
+          "description": "Drop the cookies the virtual user kept from earlier responses before\nthis step's request (default false). Not allowed when the scenario's\nauto_handle_cookies is false, where it has no effect."
         }
       },
       "additionalProperties": false,
@@ -1208,6 +1425,39 @@
       "properties": {
         "stages": {
           "minItems": 1
+        },
+        "scenarios": {
+          "contains": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "load"
+                  ]
+                },
+                {
+                  "properties": {
+                    "run_once": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "run_once"
+                  ]
+                },
+                {
+                  "properties": {
+                    "teardown": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "teardown"
+                  ]
+                }
+              ]
+            }
+          }
         }
       },
       "required": [
@@ -1223,6 +1473,39 @@
       "properties": {
         "virtual_users": {
           "minimum": 1
+        },
+        "scenarios": {
+          "contains": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "load"
+                  ]
+                },
+                {
+                  "properties": {
+                    "run_once": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "run_once"
+                  ]
+                },
+                {
+                  "properties": {
+                    "teardown": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "teardown"
+                  ]
+                }
+              ]
+            }
+          }
         }
       },
       "required": [
@@ -1242,11 +1525,96 @@
         },
         "stages": {
           "maxItems": 0
+        },
+        "scenarios": {
+          "contains": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "load"
+                  ]
+                },
+                {
+                  "properties": {
+                    "run_once": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "run_once"
+                  ]
+                },
+                {
+                  "properties": {
+                    "teardown": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "teardown"
+                  ]
+                }
+              ]
+            }
+          }
         }
       },
       "required": [
         "load"
       ]
+    },
+    {
+      "not": {
+        "required": [
+          "load"
+        ]
+      },
+      "properties": {
+        "virtual_users": {
+          "maximum": 0
+        },
+        "duration": {
+          "maxLength": 0
+        },
+        "ramp_up": {
+          "maxLength": 0
+        },
+        "stages": {
+          "maxItems": 0
+        },
+        "scenarios": {
+          "items": {
+            "anyOf": [
+              {
+                "required": [
+                  "load"
+                ]
+              },
+              {
+                "properties": {
+                  "run_once": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "run_once"
+                ]
+              },
+              {
+                "properties": {
+                  "teardown": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "teardown"
+                ]
+              }
+            ]
+          }
+        }
+      }
     }
   ],
   "properties": {
@@ -1288,7 +1656,15 @@
     },
     "load": {
       "$ref": "#/$defs/Load",
-      "description": "Arrival-rate load: iterations start at a set rate, whatever the\nresponse times. Use instead of virtual_users, duration, ramp_up and\nstages."
+      "properties": {
+        "type": {
+          "enum": [
+            "rate",
+            "ramping_rate"
+          ]
+        }
+      },
+      "description": "Arrival-rate load: iterations start at a set rate, whatever the\nresponse times. Use instead of virtual_users, duration, ramp_up and\nstages. Only types \"rate\" and \"ramping_rate\" apply here. Leave the\nwhole test-level load model out when every load scenario has its own\nload."
     },
     "http_timeout": {
       "type": "string",
@@ -1350,6 +1726,33 @@
     "tls": {
       "$ref": "#/$defs/TLSOptions",
       "description": "TLS options for every request to an https URL."
+    },
+    "cookies": {
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^(?:[\\x21\\x23-\\x2B\\x2D-\\x3A\\x3C-\\x5B\\x5D-\\x7E]|\\$\\{[^}\\r\\n\\x00]*\\})*$"
+      },
+      "propertyNames": {
+        "pattern": "^[!#$%\u0026'*+.^_`|~0-9A-Za-z-]+$"
+      },
+      "type": "object",
+      "description": "Preset cookies, by name. A name is an HTTP token (no spaces, \"=\", \";\"\nor other separators) and is sent as written. A value is cookie-octets\n(no space, '\"', \",\", \";\", \"\\\", control character or non-ASCII) outside\n${variable} references; the engine checks the resolved value when it\nsends the request. CR, LF and NUL are refused anywhere. A scenario's or a step's\ncookie of the same name replaces it. How preset cookies interact with\nthe cookie jar, a step's Cookie header and clear_cookies, and which\nhosts receive them, is defined by the engine's HTTP options\ndocumentation."
+    },
+    "vars": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "propertyNames": {
+        "not": {
+          "enum": [
+            "env",
+            "fake"
+          ]
+        },
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "type": "object",
+      "description": "Variables every virtual user starts with, readable as ${name}, at the\nlowest precedence: a CSV column, an extracted value (setup globals\nincluded) or a built-in variable of the same name wins. A name is\nASCII letters, digits, \"_\" and \"-\", and not \"env\" or \"fake\". A value\nmay contain ${...} references; when they resolve is defined by the\nengine. A scenario's vars of the same name replace these."
     }
   },
   "additionalProperties": false,
