@@ -1,0 +1,42 @@
+{
+  "schema_version": "2.0",
+  "name": "Repeat and foreach",
+  "virtual_users": 1,
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "List",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/list"
+          },
+          "extract": [
+            {
+              "variable_name": "ids",
+              "selector": "$.ids",
+              "type": "json",
+              "pick": "all"
+            }
+          ]
+        },
+        {
+          "name": "Both",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/both"
+          },
+          "repeat": {
+            "until": "x",
+            "max": 2
+          },
+          "foreach": {
+            "var": "id",
+            "in": "${ids}"
+          }
+        }
+      ]
+    }
+  ]
+}

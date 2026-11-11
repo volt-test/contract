@@ -1,0 +1,23 @@
+{
+  "schema_version": "2.0",
+  "name": "repeat.max as a string",
+  "virtual_users": 1,
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Poll",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/poll"
+          },
+          "repeat": {
+            "until": "x",
+            "max": "5"
+          }
+        }
+      ]
+    }
+  ]
+}

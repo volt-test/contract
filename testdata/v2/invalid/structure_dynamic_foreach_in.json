@@ -1,0 +1,23 @@
+{
+  "schema_version": "2.0",
+  "name": "foreach.in with two references",
+  "virtual_users": 1,
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Each",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/each"
+          },
+          "foreach": {
+            "var": "id",
+            "in": "${a}${b}"
+          }
+        }
+      ]
+    }
+  ]
+}

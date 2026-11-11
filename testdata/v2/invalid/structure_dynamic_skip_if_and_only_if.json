@@ -1,0 +1,21 @@
+{
+  "schema_version": "2.0",
+  "name": "skip_if and only_if",
+  "virtual_users": 1,
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Both",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/both"
+          },
+          "skip_if": "a",
+          "only_if": "b"
+        }
+      ]
+    }
+  ]
+}

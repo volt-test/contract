@@ -15,8 +15,8 @@ import (
 // every fixture fails for the rule it is named after. A long label is
 // matched by prefix.
 var checkFixtureProblems = map[string]string{
-	"structure_check_missing_type.json":    check0 + `.type: is required (one of "status", "header", "body", "json", "html", "timing", "url", "cookie")`,
-	"structure_check_bad_type.json":        check0 + `.type: must be one of "status", "header", "body", "json", "html", "timing", "url", "cookie", got "latency"`,
+	"structure_check_missing_type.json":    check0 + `.type: is required (one of "status", "header", "body", "json", "html", "timing", "url", "cookie", "assert")`,
+	"structure_check_bad_type.json":        check0 + `.type: must be one of "status", "header", "body", "json", "html", "timing", "url", "cookie", "assert", got "latency"`,
 	"structure_check_bad_on_fail.json":     check0 + `.on_fail: must be one of "record", "fail", "abort", got "warn"`,
 	"structure_check_bad_is.json":          check0 + `.is: must be one of "array", "object", "string", "number", "bool", "null", got "integer"`,
 	"structure_check_status_code_99.json":  check0 + `.in[1]: must be an HTTP status code from 100 to 599, got 99`,

@@ -1,0 +1,49 @@
+{
+  "schema_version": "2.0",
+  "name": "Duplicate names across groups",
+  "virtual_users": 1,
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Status",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/status"
+          }
+        },
+        {
+          "name": "Loop",
+          "repeat": {
+            "until": "done",
+            "max": 5
+          },
+          "steps": [
+            {
+              "name": "Status",
+              "request": {
+                "method": "GET",
+                "url": "https://shop.example.com/status"
+              }
+            },
+            {
+              "name": "Loop",
+              "request": {
+                "method": "GET",
+                "url": "https://shop.example.com/loop"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Inner",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/inner"
+          }
+        }
+      ]
+    }
+  ]
+}

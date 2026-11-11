@@ -1,0 +1,33 @@
+{
+  "schema_version": "2.0",
+  "name": "Group with request",
+  "virtual_users": 1,
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Loop",
+          "repeat": {
+            "until": "done",
+            "max": 5
+          },
+          "steps": [
+            {
+              "name": "Inner",
+              "request": {
+                "method": "GET",
+                "url": "https://shop.example.com/inner"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/loop"
+          },
+          "think_time": "1s"
+        }
+      ]
+    }
+  ]
+}

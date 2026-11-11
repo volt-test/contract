@@ -1,0 +1,24 @@
+{
+  "schema_version": "2.0",
+  "name": "Group without repeat",
+  "virtual_users": 1,
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Loop",
+          "steps": [
+            {
+              "name": "Inner",
+              "request": {
+                "method": "GET",
+                "url": "https://shop.example.com/inner"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

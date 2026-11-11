@@ -1,0 +1,85 @@
+{
+  "schema_version": "2.0",
+  "name": "Dynamic steps",
+  "virtual_users": 2,
+  "duration": "30s",
+  "vars": {"currency": "EUR", "label": "${expr: currency == \"EUR\" ? \"euro\" : \"other\"}"},
+  "cookies": {"ab": "${expr: iteration % 2 == 0 ? 'a' : 'b'}"},
+  "scenarios": [
+    {
+      "name": "Setup",
+      "run_once": true,
+      "steps": [
+        {
+          "name": "Seed",
+          "skip_if": "env_seeded == \"yes\"",
+          "request": {"method": "POST", "url": "https://shop.example.com/api/seed"}
+        }
+      ]
+    },
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Products",
+          "request": {"method": "GET", "url": "https://shop.example.com/api/products?page=${expr: iteration % 3 + 1}"},
+          "extract": [
+            {"variable_name": "ids", "selector": "$.items[*].id", "type": "json", "pick": "all"},
+            {"variable_name": "count", "selector": "$.total", "type": "json"}
+          ],
+          "checks": [
+            {"type": "assert", "name": "has products", "expr": "status == 200 && len(ids) > 0", "on_fail": "abort"}
+          ]
+        },
+        {
+          "name": "Product",
+          "only_if": "count > 0",
+          "foreach": {"var": "id", "in": "${ids}"},
+          "request": {"method": "GET", "url": "https://shop.example.com/api/products/${id}"}
+        },
+        {
+          "name": "Add to cart",
+          "skip_if": "count == 0",
+          "request": {
+            "method": "POST",
+            "url": "https://shop.example.com/api/cart",
+            "headers": {"X-Note": "${expr: \"total: }\" + string(qty * price)}"},
+            "body_type": "json",
+            "body_json": {
+              "line": "${expr: type == \"single_choice\" ? {\"choice_id\": choice_id} : {\"value\": random_int(0,1) == 1}}",
+              "quoted": "${expr: '}' + `}`}",
+              "plain": "${qty}"
+            }
+          }
+        },
+        {
+          "name": "Wait for order",
+          "repeat": {
+            "until": "order_status == \"ready\"",
+            "max": 50
+          },
+          "steps": [
+            {
+              "name": "Order status",
+              "request": {"method": "GET", "url": "https://shop.example.com/api/order"},
+              "extract": [{"variable_name": "order_status", "selector": "$.status", "type": "json"}],
+              "think_time": "500ms"
+            },
+            {
+              "name": "Order events",
+              "once_per_vu": false,
+              "request": {"method": "GET", "url": "https://shop.example.com/api/order/events"},
+              "checks": [{"type": "status", "in": [200]}]
+            }
+          ]
+        },
+        {
+          "name": "Poll payment",
+          "repeat": {"until": "paid", "max": 1},
+          "request": {"method": "GET", "url": "https://shop.example.com/api/payment"},
+          "extract": [{"variable_name": "paid", "selector": "$.paid", "type": "json"}]
+        }
+      ]
+    }
+  ]
+}

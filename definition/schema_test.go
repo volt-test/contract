@@ -76,6 +76,7 @@ func generateSchema(t *testing.T) []byte {
 	// Type descriptions are written here rather than taken from the Go
 	// doc comments, which follow Go conventions ("Definition is ...").
 	s.Description = "A VoltTest load test: the load profile, the system under test and the scenarios that virtual users run."
+	stepGroups(t, s)
 	typeDescriptions := map[string]string{
 		"Stage":        "One stage of a staged load profile.",
 		"RegionWeight": "One VoltTest Cloud region and its percent of the virtual users.",
@@ -83,6 +84,9 @@ func generateSchema(t *testing.T) []byte {
 		"Scenario":     "A sequence of steps that a virtual user runs.",
 		"DataConfig":   "A CSV or JSON data source. Each virtual user takes rows according to mode.",
 		"Step":         "One HTTP request in a scenario.",
+		"StepGroup":    "Steps that run in order as one unit under repeat. A group has no request of its own, and its steps cannot be groups.",
+		"Repeat":       "Runs a step or a step group again until an expression is true, at most max times.",
+		"Foreach":      "Runs a step once per element of a list variable.",
 		"Request":      "An HTTP request. The URL, body, header values, the string values of body_json, the values of fields and file names may contain ${variable} references; keys, field names and file contents are sent as written.",
 		"FilePart":     "One file of a multipart request body: a path or base64 content, with an optional file name and media type.",
 		"Extract":      "A value to capture from the response.",
@@ -197,6 +201,74 @@ func loadModels(s *jsonschema.Schema) {
 	}
 }
 
+// stepGroups splits the reflected step into a leaf step ($defs.Step,
+// without steps) and a step group ($defs.StepGroup: name, repeat and
+// steps, whose steps are leaf steps without repeat, foreach or
+// once_per_vu), picked by the steps key, and adds the rules on skip_if, only_if, repeat and
+// foreach that a JSON Schema can state. Unique names across groups,
+// expressions and templates are Parse's alone.
+func stepGroups(t *testing.T, s *jsonschema.Schema) {
+	t.Helper()
+	step := s.Definitions["Step"]
+	prop := func(def *jsonschema.Schema, name string) *jsonschema.Schema {
+		p, ok := def.Properties.Get(name)
+		if !ok {
+			t.Fatalf("schema has no property %s", name)
+		}
+		return p
+	}
+	name, repeat, steps := prop(step, "name"), prop(step, "repeat"), prop(step, "steps")
+	step.Properties.Delete("steps")
+
+	one := uint64(1)
+	inGroup := jsonschema.NewProperties()
+	inGroup.Set("repeat", jsonschema.FalseSchema)
+	inGroup.Set("foreach", jsonschema.FalseSchema)
+	inGroup.Set("once_per_vu", &jsonschema.Schema{Const: false})
+	steps.MinItems = &one
+	steps.Items = &jsonschema.Schema{AllOf: []*jsonschema.Schema{
+		{Ref: "#/$defs/Step"}, {Properties: inGroup},
+	}}
+	group := jsonschema.NewProperties()
+	group.Set("name", name)
+	group.Set("repeat", repeat)
+	group.Set("steps", steps)
+	s.Definitions["StepGroup"] = &jsonschema.Schema{
+		Type: "object", Properties: group, Required: []string{"name", "repeat", "steps"},
+		AdditionalProperties: jsonschema.FalseSchema,
+	}
+	// A step with steps is a group; deciding on that key gives an editor
+	// one schema to report against.
+	prop(s.Definitions["Scenario"], "steps").Items = &jsonschema.Schema{
+		If:   &jsonschema.Schema{Required: []string{"steps"}},
+		Then: &jsonschema.Schema{Ref: "#/$defs/StepGroup"},
+		Else: &jsonschema.Schema{Ref: "#/$defs/Step"},
+	}
+
+	// skip_if and only_if not both, "" reading as absent; foreach not
+	// with repeat.
+	zero := uint64(0)
+	emptyKey := func(k string) *jsonschema.Schema {
+		p := jsonschema.NewProperties()
+		p.Set(k, &jsonschema.Schema{MaxLength: &zero})
+		return &jsonschema.Schema{Properties: p}
+	}
+	step.DependentSchemas = map[string]*jsonschema.Schema{
+		"skip_if": {AnyOf: []*jsonschema.Schema{emptyKey("skip_if"), emptyKey("only_if")}},
+		"foreach": {Not: &jsonschema.Schema{Required: []string{"repeat"}}},
+	}
+	reserved := func(vs ...string) *jsonschema.Schema {
+		enum := make([]any, len(vs))
+		for i, v := range vs {
+			enum[i] = v
+		}
+		return &jsonschema.Schema{Enum: enum}
+	}
+	foreach := s.Definitions["Foreach"]
+	prop(foreach, "var").Not = reserved("env", "fake")
+	prop(foreach, "in").Not = reserved("${env}", "${fake}")
+}
+
 // ownLoadRules adds the rules for a scenario's own load: no weight, not on
 // a run_once or teardown scenario, and start_at only with a load. It
 // extends the dependentSchemas that setupTeardownRules sets.
@@ -239,7 +311,9 @@ func cookieVarRules(t *testing.T, s *jsonschema.Schema) {
 	for _, def := range []*jsonschema.Schema{s, s.Definitions["Scenario"], s.Definitions["Step"]} {
 		c := prop(def, "cookies")
 		c.PropertyNames = &jsonschema.Schema{Pattern: "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$"}
-		c.AdditionalProperties.Pattern = `^(?:[\x21\x23-\x2B\x2D-\x3A\x3C-\x5B\x5D-\x7E]|\$\{[^}\r\n\x00]*\})*$`
+		// A value with a ${expr: ...} passes whole: an expression's end
+		// depends on its quotes and braces, which Parse alone follows.
+		c.AdditionalProperties.Pattern = `^(?:[\x21\x23-\x2B\x2D-\x3A\x3C-\x5B\x5D-\x7E]|\$\{[^}\r\n\x00]*\})*$|^[^\r\n\x00]*\$\{expr:[^\r\n\x00]*$`
 	}
 	for _, def := range []*jsonschema.Schema{s, s.Definitions["Scenario"]} {
 		prop(def, "vars").PropertyNames = &jsonschema.Schema{Pattern: "^[A-Za-z0-9_-]+$",
@@ -249,6 +323,10 @@ func cookieVarRules(t *testing.T, s *jsonschema.Schema) {
 	auto.Set("auto_handle_cookies", &jsonschema.Schema{Const: true})
 	noClear := jsonschema.NewProperties()
 	noClear.Set("clear_cookies", &jsonschema.Schema{Const: false})
+	// The steps of a step group follow the same rule.
+	inGroup := jsonschema.NewProperties()
+	inGroup.Set("clear_cookies", &jsonschema.Schema{Const: false})
+	noClear.Set("steps", &jsonschema.Schema{Items: &jsonschema.Schema{Properties: inGroup}})
 	steps := jsonschema.NewProperties()
 	steps.Set("steps", &jsonschema.Schema{Items: &jsonschema.Schema{Properties: noClear}})
 	s.Definitions["Scenario"].DependentSchemas["auto_handle_cookies"] = &jsonschema.Schema{AnyOf: []*jsonschema.Schema{
@@ -393,8 +471,14 @@ func oncePerVURules(t *testing.T, s *jsonschema.Schema) {
 		p.Set("once_per_vu", &jsonschema.Schema{Const: false})
 		return &jsonschema.Schema{Properties: p}
 	}
+	// No loop in a run_once or teardown scenario: no step group, repeat
+	// or foreach.
+	setupStep := notOnce()
+	for _, k := range []string{"steps", "repeat", "foreach"} {
+		setupStep.Properties.Set(k, jsonschema.FalseSchema)
+	}
 	// In the branch where the flag is on (the last one), every step
-	// leaves once_per_vu off.
+	// leaves once_per_vu off and has no loop.
 	for _, k := range []string{"run_once", "teardown"} {
 		dep, ok := scenario.DependentSchemas[k]
 		if !ok || len(dep.AnyOf) != 2 {
@@ -404,7 +488,7 @@ func oncePerVURules(t *testing.T, s *jsonschema.Schema) {
 		if on.Properties == nil {
 			on.Properties = jsonschema.NewProperties()
 		}
-		on.Properties.Set("steps", &jsonschema.Schema{Items: notOnce()})
+		on.Properties.Set("steps", &jsonschema.Schema{Items: setupStep})
 	}
 	// A load scenario (neither flag true) has a step without once_per_vu.
 	flag := func(k string) *jsonschema.Schema {
@@ -688,6 +772,13 @@ var knownSchemaLooser = map[string]string{
 
 	"structure_start_at_zero.json": "durations are plain strings in the schema",
 	"structure_start_at_bad.json":  "durations are plain strings in the schema",
+
+	"structure_dynamic_expr_unterminated.json":    "templates are plain strings in the schema; where a ${expr: ...} ends is Parse's rule",
+	"structure_dynamic_expr_empty.json":           "templates are plain strings in the schema; where a ${expr: ...} ends is Parse's rule",
+	"structure_dynamic_group_duplicate_name.json": "names must be unique, counting step groups and the steps inside them",
+	"structure_dynamic_assert_no_expr.json":       "the schema does not know which keys a check type requires",
+	"structure_dynamic_discard_body_assert.json":  "which checks and extractors read the body is Parse's rule",
+	"structure_dynamic_group_discard_body.json":   "which checks and extractors read the body is Parse's rule",
 }
 
 // TestSchemaAgreesWithParse checks that the schema and Parse agree on
@@ -914,9 +1005,61 @@ func TestSchemaShape(t *testing.T) {
 	}
 
 	checkShape(t, props, defs)
+	stepGroupShape(t, defs)
 	httpTLSShape(t, props, defs)
 	loadShape(t, s, defs)
 	bodyShape(t, defs)
+}
+
+// stepGroupShape pins the split between leaf steps and step groups.
+func stepGroupShape(t *testing.T, defs map[string]any) {
+	t.Helper()
+	obj := func(v any) map[string]any { m, _ := v.(map[string]any); return m }
+	keys := func(m map[string]any) []string {
+		var out []string
+		for k := range m {
+			out = append(out, k)
+		}
+		sort.Strings(out)
+		return out
+	}
+	step, group := obj(defs["Step"]), obj(defs["StepGroup"])
+	sp := obj(step["properties"])
+	if _, ok := sp["steps"]; ok {
+		t.Error("$defs.Step has steps; a leaf step has none")
+	}
+	for _, k := range []string{"skip_if", "only_if", "repeat", "foreach"} {
+		if _, ok := sp[k]; !ok {
+			t.Errorf("$defs.Step has no %s", k)
+		}
+	}
+	if !reflect.DeepEqual(step["required"], []any{"name", "request"}) {
+		t.Errorf("step required = %v", step["required"])
+	}
+	if got := keys(obj(group["properties"])); !reflect.DeepEqual(got, []string{"name", "repeat", "steps"}) {
+		t.Errorf("step group keys = %q", got)
+	}
+	if !reflect.DeepEqual(group["required"], []any{"name", "repeat", "steps"}) {
+		t.Errorf("step group required = %v", group["required"])
+	}
+	inner := obj(obj(obj(group["properties"])["steps"])["items"])
+	wantInner := map[string]any{"allOf": []any{
+		map[string]any{"$ref": "#/$defs/Step"},
+		map[string]any{"properties": map[string]any{"repeat": false, "foreach": false, "once_per_vu": map[string]any{"const": false}}},
+	}}
+	if !reflect.DeepEqual(inner, wantInner) {
+		t.Errorf("step group items = %v, want %v", inner, wantInner)
+	}
+	items := obj(obj(obj(obj(defs["Scenario"])["properties"])["steps"])["items"])
+	wantItems := map[string]any{"if": map[string]any{"required": []any{"steps"}},
+		"then": map[string]any{"$ref": "#/$defs/StepGroup"}, "else": map[string]any{"$ref": "#/$defs/Step"}}
+	if !reflect.DeepEqual(items, wantItems) {
+		t.Errorf("scenario steps items = %v, want %v", items, wantItems)
+	}
+	repeat := obj(obj(defs["Repeat"])["properties"])
+	if m := obj(repeat["max"]); m["minimum"] != 1.0 || m["maximum"] != 1000.0 {
+		t.Errorf("repeat max = %v, want 1 to 1000", m)
+	}
 }
 
 // bodyShape pins the schema of the request body keys.
@@ -1141,7 +1284,7 @@ func checkShape(t *testing.T, props, defs map[string]any) {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	want := []string{"between", "contains", "count", "duration", "empty", "equals", "exists", "in", "is", "matches",
+	want := []string{"between", "contains", "count", "duration", "empty", "equals", "exists", "expr", "in", "is", "matches",
 		"missing", "name", "not_contains", "not_in", "on_fail", "selector", "size", "type"}
 	if !reflect.DeepEqual(keys, want) {
 		t.Errorf("check keys = %q, want %q", keys, want)

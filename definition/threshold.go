@@ -94,8 +94,9 @@ func (t ThresholdConfig) MarshalJSON() ([]byte, error) {
 
 // Bounds returns the thresholds of d with the part of the test each one
 // applies to: the test's own thresholds first, then each scenario's
-// followed by the thresholds of its steps, in document order. A Ref names
-// scenarios and steps by name, which v2 makes unique.
+// followed by the thresholds of its leaf steps (see Scenario.LeafSteps),
+// in document order. A Ref names scenarios and steps by name, which v2
+// makes unique.
 //
 // Bounds checks each threshold as Parse does (the expression, its scope
 // and delay_abort), and that every scenario and step carrying thresholds
@@ -147,23 +148,29 @@ func collectBounds(d *Definition, ps *problems, keep, checkNames bool, objectFor
 		}
 		add(p+".thresholds", sc.Thresholds, thresholds.ScopeScenario, thresholds.Ref{Scenario: sc.Name})
 		for j, st := range sc.Steps {
-			sp := p + ".steps[" + strconv.Itoa(j) + "]"
+			// Parse refuses thresholds on a step group; a group built in
+			// Go is refused here.
+			if sp := p + ".steps[" + strconv.Itoa(j) + "]"; st.IsGroup() && len(st.Thresholds) > 0 {
+				ps.add(sp+".thresholds", groupKeyMessage)
+			}
+		}
+		forEachLeaf(sc.Steps, p, func(sp string, st *Step) {
 			if checkNames && blank(st.Name) && len(st.Thresholds) > 0 {
 				ps.add(sp+".name", "is required")
 			}
 			add(sp+".thresholds", st.Thresholds, thresholds.ScopeStep, thresholds.Ref{Scenario: sc.Name, Step: st.Name})
-		}
+		})
 	}
 	return out
 }
 
-// carriesThresholds reports whether a scenario or any of its steps has
-// thresholds.
+// carriesThresholds reports whether a scenario or any of its leaf steps
+// has thresholds.
 func carriesThresholds(sc Scenario) bool {
 	if len(sc.Thresholds) > 0 {
 		return true
 	}
-	for _, st := range sc.Steps {
+	for _, st := range sc.LeafSteps() {
 		if len(st.Thresholds) > 0 {
 			return true
 		}

@@ -1,6 +1,7 @@
 package definition
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -14,7 +15,7 @@ var (
 	dataFormats  = []string{"csv", "json"}
 	dataModes    = []string{"sequential", "random", "unique"}
 	checkTypes   = []string{string(CheckStatus), string(CheckHeader), string(CheckBody), string(CheckJSON),
-		string(CheckHTML), string(CheckTiming), string(CheckURL), string(CheckCookie)}
+		string(CheckHTML), string(CheckTiming), string(CheckURL), string(CheckCookie), string(CheckAssert)}
 	failModes = []string{string(FailRecord), string(FailFail), string(FailAbort)}
 	picks     = []string{string(PickRandom), string(PickFirst), string(PickLast), string(PickAll)}
 	jsonKinds = []string{"array", "object", "string", "number", "bool", "null"}
@@ -134,58 +135,19 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 		if len(sc.Steps) == 0 {
 			ps.add(p+".steps", "must have at least one step")
 		}
-		stepNames := map[string]int{}
-		for j, st := range sc.Steps {
+		ss := stepScope{d: d, sc: sc, index: i, baseURL: baseURL, follows: follows, globals: globals,
+			inline: &inline, names: map[string]string{}, extracted: extractedNames(sc)}
+		for j := range sc.Steps {
+			st := sc.Steps[j]
 			sp := p + ".steps[" + strconv.Itoa(j) + "]"
-			ps.uniqueName(sp, st.Name, stepNames, j, p+".steps")
-			ps.thinkTime(sp+".think_time", st.ThinkTime)
-			validateCookies(&ps, sp+".cookies", st.Cookies)
-			if st.ClearCookies && sc.AutoHandleCookies != nil && !*sc.AutoHandleCookies {
-				ps.add(sp+".clear_cookies", "has no effect when auto_handle_cookies is false")
+			if st.Steps == nil {
+				validateStep(&ps, &ss, sp, st, false)
+				continue
 			}
-			if strings.TrimSpace(st.Request.Method) == "" {
-				ps.add(sp+".request.method", "is required")
+			validateGroup(&ps, &ss, sp, st)
+			for k, child := range st.Steps {
+				validateStep(&ps, &ss, indexPath(sp+".steps", k), child, true)
 			}
-			if msg := stepURLProblem(st.Request.URL, baseURL); msg != "" {
-				ps.add(sp+".request.url", msg)
-			}
-			validateRequestBody(&ps, sp+".request", st.Request)
-			validateRequestRules(&ps, sp+".request", st.Request, &inline)
-			for k, ex := range st.Extract {
-				ep := sp + ".extract[" + strconv.Itoa(k) + "]"
-				if strings.TrimSpace(ex.VariableName) == "" {
-					ps.add(ep+".variable_name", "is required")
-				}
-				if strings.TrimSpace(ex.Selector) == "" {
-					ps.add(ep+".selector", "is required")
-				}
-				ps.oneOf(ep+".type", ex.Type, extractTypes)
-				if ex.OnFail != "" {
-					if ex.Required {
-						ps.oneOf(ep+".on_fail", string(ex.OnFail), failModes)
-					} else {
-						ps.add(ep+".on_fail", "only applies with required: true")
-					}
-				}
-				if ex.Pick != "" {
-					if ex.Type == "header" || ex.Type == "cookie" {
-						ps.add(ep+".pick", "only applies to json, regex and html extractors")
-					} else {
-						ps.oneOf(ep+".pick", string(ex.Pick), picks)
-					}
-				}
-				if owner, ok := globals[ex.VariableName]; ok && owner != i {
-					ps.add(ep+".variable_name", fmt.Sprintf("%s is a global set by the run_once scenario scenarios[%d]; "+
-						"no other scenario may extract it", quoteShort(ex.VariableName), owner))
-				}
-			}
-			for k, c := range st.Checks {
-				validateCheck(&ps, sp+".checks["+strconv.Itoa(k)+"]", c)
-			}
-			checkLabels(&ps, sp, st)
-			validateStepRedirects(&ps, sp, st, follows)
-			validateResponseReading(&ps, sp, st)
-			validateOncePerVU(&ps, sp, sc, st)
 		}
 		if sc.IsLoad() && len(sc.Steps) > 0 && allOncePerVU(sc.Steps) {
 			ps.add(p+".steps", "must have at least one step without once_per_vu")
@@ -194,8 +156,98 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 	if len(d.Scenarios) > 0 && !hasLoadScenario(d.Scenarios) {
 		ps.add("scenarios", "must have at least one load scenario, one without run_once or teardown")
 	}
+	forEachTemplate(d, func(path, src string) {
+		var te *TemplateError
+		if err := scanTemplate(src, func(TemplateRef) {}); errors.As(err, &te) {
+			ps.add(path, te.message())
+		}
+	})
 	collectBounds(d, &ps, false, false, func(path string, _ ThresholdConfig) bool { return objectForms[path] })
 	return ps.err()
+}
+
+// stepScope is what the rules for one step need from its scenario and test.
+type stepScope struct {
+	d         *Definition
+	sc        Scenario
+	index     int // of the scenario
+	baseURL   string
+	follows   bool
+	globals   map[string]int
+	inline    *inlineBudget
+	names     map[string]string // step name -> path of the first step with it
+	extracted map[string]bool   // variables the scenario's steps extract
+}
+
+// validateStep checks one step that sends a request at path sp. inGroup
+// is set for a step inside a step group.
+func validateStep(ps *problems, ss *stepScope, sp string, st Step, inGroup bool) {
+	ss.uniqueStepName(ps, sp, st.Name)
+	ps.thinkTime(sp+".think_time", st.ThinkTime)
+	validateCookies(ps, sp+".cookies", st.Cookies)
+	if st.ClearCookies && ss.sc.AutoHandleCookies != nil && !*ss.sc.AutoHandleCookies {
+		ps.add(sp+".clear_cookies", "has no effect when auto_handle_cookies is false")
+	}
+	if strings.TrimSpace(st.Request.Method) == "" {
+		ps.add(sp+".request.method", "is required")
+	}
+	if msg := stepURLProblem(st.Request.URL, ss.baseURL); msg != "" {
+		ps.add(sp+".request.url", msg)
+	}
+	validateRequestBody(ps, sp+".request", st.Request)
+	validateRequestRules(ps, sp+".request", st.Request, ss.inline)
+	for k, ex := range st.Extract {
+		ep := sp + ".extract[" + strconv.Itoa(k) + "]"
+		if strings.TrimSpace(ex.VariableName) == "" {
+			ps.add(ep+".variable_name", "is required")
+		}
+		if strings.TrimSpace(ex.Selector) == "" {
+			ps.add(ep+".selector", "is required")
+		}
+		ps.oneOf(ep+".type", ex.Type, extractTypes)
+		if ex.OnFail != "" {
+			if ex.Required {
+				ps.oneOf(ep+".on_fail", string(ex.OnFail), failModes)
+			} else {
+				ps.add(ep+".on_fail", "only applies with required: true")
+			}
+		}
+		if ex.Pick != "" {
+			if ex.Type == "header" || ex.Type == "cookie" {
+				ps.add(ep+".pick", "only applies to json, regex and html extractors")
+			} else {
+				ps.oneOf(ep+".pick", string(ex.Pick), picks)
+			}
+		}
+		if owner, ok := ss.globals[ex.VariableName]; ok && owner != ss.index {
+			ps.add(ep+".variable_name", fmt.Sprintf("%s is a global set by the run_once scenario scenarios[%d]; "+
+				"no other scenario may extract it", quoteShort(ex.VariableName), owner))
+		}
+	}
+	for k, c := range st.Checks {
+		validateCheck(ps, sp+".checks["+strconv.Itoa(k)+"]", c)
+	}
+	checkLabels(ps, sp, st)
+	validateStepRedirects(ps, sp, st, ss.follows)
+	validateResponseReading(ps, sp, st)
+	if inGroup && st.OncePerVU {
+		ps.add(sp+".once_per_vu", inGroupMessage)
+	} else {
+		validateOncePerVU(ps, sp, ss.sc, st)
+	}
+	validateDynamicStep(ps, ss, sp, st, inGroup)
+}
+
+func (ss *stepScope) uniqueStepName(ps *problems, sp, name string) {
+	if strings.TrimSpace(name) == "" {
+		ps.add(sp+".name", "is required")
+		return
+	}
+	if first, dup := ss.names[name]; dup {
+		ps.add(sp+".name", fmt.Sprintf("%s is already used by %s", quoteShort(name), first))
+		return
+	}
+	ss.names[name] = sp
 }
 
 // validateRequestBody applies the body_type rules to the request at rp:
@@ -308,7 +360,8 @@ func validateOncePerVU(ps *problems, sp string, sc Scenario, st Step) {
 }
 
 // allOncePerVU reports whether every step has once_per_vu, which would
-// leave later iterations of a load scenario with nothing to run.
+// leave later iterations of a load scenario with nothing to run. A step
+// group never has it.
 func allOncePerVU(steps []Step) bool {
 	for _, st := range steps {
 		if !st.OncePerVU {
@@ -327,7 +380,7 @@ func setupGlobals(scenarios []Scenario) map[string]int {
 		if !sc.RunOnce {
 			continue
 		}
-		for _, st := range sc.Steps {
+		for _, st := range sc.LeafSteps() {
 			for _, ex := range st.Extract {
 				if strings.TrimSpace(ex.VariableName) == "" {
 					continue
@@ -446,7 +499,7 @@ func (ps *problems) oneOf(path, v string, allowed []string) {
 	ps.add(path, fmt.Sprintf("must be one of %s, got %s", strings.Join(quoted, ", "), quoteShort(v)))
 }
 
-// uniqueName checks that a scenario or step has a name and that no earlier
+// uniqueName checks that a scenario has a name and that no earlier
 // sibling uses it. listPath is the path of the enclosing list.
 func (ps *problems) uniqueName(path, name string, seen map[string]int, idx int, listPath string) {
 	if strings.TrimSpace(name) == "" {

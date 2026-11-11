@@ -260,7 +260,19 @@ type walker struct {
 	// objectForms records the paths of values written in the object form
 	// of a type that also has a non-object form (a threshold object).
 	objectForms map[string]bool
+	inGroup     bool
 }
+
+var stepType = reflect.TypeOf(Step{})
+
+// groupKeys are the keys a step group takes. A step is a group when it
+// has a "steps" key.
+var groupKeys = map[string]bool{"name": true, "repeat": true, "steps": true}
+
+const (
+	groupKeyMessage    = "does not apply to a step group, which takes only name, repeat and steps"
+	nestedGroupMessage = "is not allowed here: a step group cannot contain another step group"
+)
 
 func (w *walker) problem(path, msg string) {
 	w.problems.add(path, msg)
@@ -446,6 +458,18 @@ func (w *walker) walkStruct(raw json.RawMessage, t reflect.Type, path string) {
 	if w.visited != nil {
 		w.visited[t] = true
 	}
+	group := false
+	if t == stepType {
+		steps, ok := memberValue(members, "steps")
+		group = ok && !isEmptyArray(steps)
+		if ok && !group {
+			w.problem(path+".steps", "must have at least one step")
+		}
+	}
+	if group && w.inGroup {
+		w.problem(path+".steps", nestedGroupMessage)
+		return
+	}
 	fields := fieldsOf(t)
 	for _, m := range members {
 		f, ok := fields.byName[string(m.key)]
@@ -457,8 +481,31 @@ func (w *walker) walkStruct(raw json.RawMessage, t reflect.Type, path string) {
 			}
 			continue
 		}
-		w.walk(m.val, f.typ, joinKey(path, m.key))
+		switch {
+		case group && !groupKeys[f.name]:
+			w.problem(joinKey(path, m.key), groupKeyMessage)
+		case group && f.name == "steps":
+			w.inGroup = true
+			w.walk(m.val, f.typ, joinKey(path, m.key))
+			w.inGroup = false
+		default:
+			w.walk(m.val, f.typ, joinKey(path, m.key))
+		}
 	}
+}
+
+func memberValue(ms []member, key string) ([]byte, bool) {
+	for _, m := range ms {
+		if string(m.key) == key {
+			return m.val, true
+		}
+	}
+	return nil, false
+}
+
+func isEmptyArray(raw []byte) bool {
+	raw = bytes.TrimSpace(raw)
+	return len(raw) > 0 && raw[0] == '[' && bytes.Equal(bytes.TrimSpace(raw[1:]), []byte("]"))
 }
 
 // v1walker reads a v1 document the way encoding/json decodes it into the

@@ -60,7 +60,9 @@ func sample(t reflect.Type) any {
 	case reflect.Struct:
 		m := map[string]any{}
 		for name, f := range fieldsOf(t).byName {
-			if !f.v1Only {
+			// A step with steps is a group, which takes few keys; the
+			// test adds one.
+			if !f.v1Only && !(t == stepType && name == "steps") {
 				m[name] = sample(f.typ)
 			}
 		}
@@ -89,7 +91,12 @@ func TestWalkerVisitsEveryStruct(t *testing.T) {
 	want := map[reflect.Type]bool{}
 	reachable(reflect.TypeOf(Definition{}), false, want)
 
-	doc, err := json.Marshal(sample(reflect.TypeOf(Definition{})))
+	def := sample(reflect.TypeOf(Definition{})).(map[string]any)
+	sc := def["scenarios"].([]any)[0].(map[string]any)
+	leaf := sample(stepType).(map[string]any)
+	group := map[string]any{"name": "g", "repeat": sample(reflect.TypeOf(Repeat{})), "steps": []any{leaf}}
+	sc["steps"] = append(sc["steps"].([]any), group)
+	doc, err := json.Marshal(def)
 	if err != nil {
 		t.Fatal(err)
 	}

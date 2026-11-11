@@ -450,7 +450,9 @@ func TestCloudProblemsCookiesVars(t *testing.T) {
 // TestCookieValuePatternMatchesParse checks the schema's cookie value
 // pattern against Parse on every value of up to four characters from an
 // alphabet that covers references, cookie-octets and the bytes refused
-// inside and outside them.
+// inside and outside them, where the two agree exactly, and on values
+// with a ${expr: ...}, which the pattern lets through whole: it must
+// accept every value Parse accepts.
 func TestCookieValuePatternMatchesParse(t *testing.T) {
 	var schema struct {
 		Properties map[string]struct {
@@ -474,7 +476,9 @@ func TestCookieValuePatternMatchesParse(t *testing.T) {
 		}
 		values, last = append(values, next...), next
 	}
-	for _, v := range values {
+	exprs := []string{"${expr: x}", `${expr: {"a": "b c"} }`, `a${expr: '}' }b`, "${expr: x} ;", "${expr:}", "${expr: 'x",
+		"${expr: x}${env.A}", "${expr: x}\r", "\x00${expr: x}", `${a b}${expr: "}"}`}
+	for _, v := range append(values, exprs...) {
 		doc, err := json.Marshal(map[string]any{"schema_version": "2.0", "name": "c", "virtual_users": 1,
 			"cookies": map[string]string{"c": v}, "scenarios": []any{map[string]any{"name": "s", "steps": []any{
 				map[string]any{"name": "a", "request": map[string]any{"method": "GET", "url": "https://a.example.com/"}}}}}})
@@ -482,8 +486,12 @@ func TestCookieValuePatternMatchesParse(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, perr := definition.Parse(doc)
-		if accepted := perr == nil; accepted != pattern.MatchString(v) {
-			t.Errorf("value %q: Parse accepts %v, pattern matches %v", v, accepted, !accepted)
+		accepted, matches := perr == nil, pattern.MatchString(v)
+		switch {
+		case accepted && !matches:
+			t.Errorf("value %q: Parse accepts it, the pattern does not", v)
+		case !accepted && matches && !strings.Contains(v, "${expr:"):
+			t.Errorf("value %q: the pattern accepts it, Parse does not", v)
 		}
 	}
 }

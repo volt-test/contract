@@ -13,8 +13,9 @@ const (
 
 // JSONSelectorProblems reports the selectors of json extractors and json
 // checks in a parsed v2 definition that the engine does not read. Per
-// step, each extract[k].selector comes first, then each
-// checks[k].selector. Other types' selectors are not scanned.
+// leaf step (steps inside step groups included), each extract[k].selector
+// comes first, then each checks[k].selector. Other types' selectors are
+// not scanned.
 //
 // A selector is an optional "$." prefix, then dot-separated keys. A key
 // is any non-empty text without '.', '[', ']' or white space, other than
@@ -29,8 +30,7 @@ func JSONSelectorProblems(d *Definition) []Problem {
 	}
 	var ps []Problem
 	for i, sc := range d.Scenarios {
-		for j, st := range sc.Steps {
-			sp := indexPath(indexPath("scenarios", i)+".steps", j)
+		forEachLeaf(sc.Steps, indexPath("scenarios", i), func(sp string, st *Step) {
 			for k, e := range st.Extract {
 				if e.Type == "json" && !jsonSelectorOK(e.Selector, true) {
 					ps = append(ps, Problem{Path: indexPath(sp+".extract", k) + ".selector", Message: quoteShort(e.Selector) + jsonExtractSelectorMessage})
@@ -41,7 +41,7 @@ func JSONSelectorProblems(d *Definition) []Problem {
 					ps = append(ps, Problem{Path: indexPath(sp+".checks", k) + ".selector", Message: quoteShort(c.Selector) + jsonCheckSelectorMessage})
 				}
 			}
-		}
+		})
 	}
 	return ps
 }

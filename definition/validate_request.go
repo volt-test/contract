@@ -211,9 +211,10 @@ func validateResponseReading(ps *problems, sp string, st Step) {
 
 // ReadsBody reports whether a check or extractor of the step reads the
 // response body's content: a body check with equals, contains,
-// not_contains or matches, a json or html check, or a json, regex or html
-// extractor. Such a step keeps its body under http.discard_bodies, and
-// Parse refuses discard_body: true on it.
+// not_contains or matches, a json, html or assert check (an assert's
+// expression may read the body), or a json, regex or html extractor. Such
+// a step keeps its body under http.discard_bodies, and Parse refuses
+// discard_body: true on it.
 func (s Step) ReadsBody() bool {
 	for _, c := range s.Checks {
 		if _, reads := bodyReadingOp(c); reads {
@@ -243,11 +244,12 @@ func article(typ string) string {
 }
 
 // bodyReadingOp reports whether a check reads the response body's content,
-// and the operator that does for a body check ("" for json and html, which
-// always do). size and empty need only the length.
+// and the operator that does for a body check ("" for json, html and
+// assert, which always count as reading it). size and empty need only the
+// length.
 func bodyReadingOp(c Check) (string, bool) {
 	switch c.Type {
-	case CheckJSON, CheckHTML:
+	case CheckJSON, CheckHTML, CheckAssert:
 		return "", true
 	case CheckBody:
 		for _, op := range c.operators() {

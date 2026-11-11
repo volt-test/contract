@@ -1,0 +1,25 @@
+{
+  "schema_version": "2.0",
+  "name": "assert without expr",
+  "virtual_users": 1,
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Check",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/check"
+          },
+          "checks": [
+            {
+              "type": "assert",
+              "name": "ok"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

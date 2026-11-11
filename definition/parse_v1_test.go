@@ -16,6 +16,8 @@ import (
 // not reproduce. api_key is read but never written back out.
 var knownDropped = map[string]bool{
 	"api_key": true,
+	// Not a key of a v1 validate entry; every v1 reader ignores it.
+	"scenarios[0].steps[0].validate[0].expr": true,
 }
 
 // v2OnlyDropped reports whether a leaf path lies under a v2-only key,
@@ -30,7 +32,8 @@ func v2OnlyDropped(path string) bool {
 		"scenarios[].steps[].request.files", "scenarios[].steps[].request.body_base64", "scenarios[].steps[].request.timeout",
 		"scenarios[].steps[].discard_body", "scenarios[].steps[].response_type", "cookies", "vars", "scenarios[].load",
 		"scenarios[].start_at", "scenarios[].cookies", "scenarios[].vars", "scenarios[].steps[].cookies",
-		"scenarios[].steps[].clear_cookies"} {
+		"scenarios[].steps[].clear_cookies", "scenarios[].steps[].skip_if", "scenarios[].steps[].only_if",
+		"scenarios[].steps[].repeat", "scenarios[].steps[].foreach", "scenarios[].steps[].steps"} {
 		if p == prefix || strings.HasPrefix(p, prefix+".") || strings.HasPrefix(p, prefix+"[") {
 			return true
 		}

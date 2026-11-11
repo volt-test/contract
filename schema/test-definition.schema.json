@@ -6,7 +6,7 @@
       "properties": {
         "name": {
           "type": "string",
-          "description": "Name of the check in results, unique within the step. Without one,\nthe check is named after its type, selector, operator and value, and\nfor every type except header that label contains the expected value\nas written; give a check whose value is sensitive a name."
+          "description": "Name of the check in results, unique within the step; required for\ntype assert. Without one, the check is named after its type,\nselector, operator and value, and for every type except header that\nlabel contains the expected value as written; give a check whose\nvalue is sensitive a name."
         },
         "type": {
           "type": "string",
@@ -18,9 +18,10 @@
             "html",
             "timing",
             "url",
-            "cookie"
+            "cookie",
+            "assert"
           ],
-          "description": "What the check reads: \"status\" (the status code), \"header\", \"body\",\n\"json\" (the body as JSON), \"html\" (the body as HTML), \"timing\", \"url\"\n(the final URL after redirects; the request URL when redirects are\nnot followed) or \"cookie\". When redirects are followed, status,\nheader, body, json and html read the final response, and cookie\nreads the Set-Cookie headers of the final response and of every\nredirect followed to reach it, a later one winning for the same name."
+          "description": "What the check reads: \"status\" (the status code), \"header\", \"body\",\n\"json\" (the body as JSON), \"html\" (the body as HTML), \"timing\", \"url\"\n(the final URL after redirects; the request URL when redirects are\nnot followed) or \"cookie\". When redirects are followed, status,\nheader, body, json and html read the final response, and cookie\nreads the Set-Cookie headers of the final response and of every\nredirect followed to reach it, a later one winning for the same name.\n\"assert\" evaluates expr against the response."
         },
         "selector": {
           "type": "string",
@@ -143,6 +144,10 @@
         "duration": {
           "type": "string",
           "description": "timing: the total request time, the same measurement the duration\nthresholds use, e.g. \"\u003c 500ms\"."
+        },
+        "expr": {
+          "type": "string",
+          "description": "assert: an expression over the response that must be true, e.g.\n\"status == 200 \u0026\u0026 duration_ms \u003c 500\". It takes no selector."
         },
         "on_fail": {
           "anyOf": [
@@ -403,6 +408,39 @@
       "additionalProperties": false,
       "type": "object",
       "description": "One file of a multipart request body: a path or base64 content, with an optional file name and media type."
+    },
+    "Foreach": {
+      "properties": {
+        "var": {
+          "not": {
+            "enum": [
+              "env",
+              "fake"
+            ]
+          },
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "description": "Variable that holds the current element, readable as ${var} and in\nexpressions: ASCII letters, digits and \"_\", not starting with a\ndigit, not \"env\" or \"fake\", and not a variable the scenario extracts,\na setup global or a vars name."
+        },
+        "in": {
+          "not": {
+            "enum": [
+              "${env}",
+              "${fake}"
+            ]
+          },
+          "type": "string",
+          "pattern": "^\\$\\{[A-Za-z0-9_-]+\\}$",
+          "description": "The list: exactly one ${name} reference to a variable that holds a\nJSON array, such as one extracted with pick \"all\"."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "var",
+        "in"
+      ],
+      "description": "Runs a step once per element of a list variable."
     },
     "HTTPOptions": {
       "properties": {
@@ -686,6 +724,28 @@
         "region"
       ],
       "description": "One VoltTest Cloud region and its percent of the virtual users."
+    },
+    "Repeat": {
+      "properties": {
+        "until": {
+          "type": "string",
+          "pattern": "\\S",
+          "description": "Expression that ends the repeat when true, evaluated after each run."
+        },
+        "max": {
+          "type": "integer",
+          "maximum": 1000,
+          "minimum": 1,
+          "description": "Most runs, from 1 to 1000. Reaching it while until is still false\nfails the step."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "until",
+        "max"
+      ],
+      "description": "Runs a step or a step group again until an expression is true, at most max times."
     },
     "Request": {
       "dependentSchemas": {
@@ -998,6 +1058,15 @@
                     "properties": {
                       "clear_cookies": {
                         "const": false
+                      },
+                      "steps": {
+                        "items": {
+                          "properties": {
+                            "clear_cookies": {
+                              "const": false
+                            }
+                          }
+                        }
                       }
                     }
                   }
@@ -1041,7 +1110,10 @@
                     "properties": {
                       "once_per_vu": {
                         "const": false
-                      }
+                      },
+                      "steps": false,
+                      "repeat": false,
+                      "foreach": false
                     }
                   }
                 }
@@ -1084,7 +1156,10 @@
                     "properties": {
                       "once_per_vu": {
                         "const": false
-                      }
+                      },
+                      "steps": false,
+                      "repeat": false,
+                      "foreach": false
                     }
                   }
                 }
@@ -1118,11 +1193,21 @@
         },
         "steps": {
           "items": {
-            "$ref": "#/$defs/Step"
+            "if": {
+              "required": [
+                "steps"
+              ]
+            },
+            "then": {
+              "$ref": "#/$defs/StepGroup"
+            },
+            "else": {
+              "$ref": "#/$defs/Step"
+            }
           },
           "type": "array",
           "minItems": 1,
-          "description": "Steps, run in order."
+          "description": "Steps, run in order. A step may be a step group."
         },
         "data_config": {
           "$ref": "#/$defs/DataConfig",
@@ -1154,7 +1239,7 @@
         "cookies": {
           "additionalProperties": {
             "type": "string",
-            "pattern": "^(?:[\\x21\\x23-\\x2B\\x2D-\\x3A\\x3C-\\x5B\\x5D-\\x7E]|\\$\\{[^}\\r\\n\\x00]*\\})*$"
+            "pattern": "^(?:[\\x21\\x23-\\x2B\\x2D-\\x3A\\x3C-\\x5B\\x5D-\\x7E]|\\$\\{[^}\\r\\n\\x00]*\\})*$|^[^\\r\\n\\x00]*\\$\\{expr:[^\\r\\n\\x00]*$"
           },
           "propertyNames": {
             "pattern": "^[!#$%\u0026'*+.^_`|~0-9A-Za-z-]+$"
@@ -1208,15 +1293,42 @@
       "description": "One stage of a staged load profile."
     },
     "Step": {
+      "dependentSchemas": {
+        "foreach": {
+          "not": {
+            "required": [
+              "repeat"
+            ]
+          }
+        },
+        "skip_if": {
+          "anyOf": [
+            {
+              "properties": {
+                "skip_if": {
+                  "maxLength": 0
+                }
+              }
+            },
+            {
+              "properties": {
+                "only_if": {
+                  "maxLength": 0
+                }
+              }
+            }
+          ]
+        }
+      },
       "properties": {
         "name": {
           "type": "string",
           "pattern": "\\S",
-          "description": "Step name, unique within the scenario."
+          "description": "Step name, unique within the scenario, counting step groups and the\nsteps inside them."
         },
         "request": {
           "$ref": "#/$defs/Request",
-          "description": "The HTTP request to send."
+          "description": "The HTTP request to send. A step group has none."
         },
         "extract": {
           "items": {
@@ -1278,7 +1390,7 @@
         "cookies": {
           "additionalProperties": {
             "type": "string",
-            "pattern": "^(?:[\\x21\\x23-\\x2B\\x2D-\\x3A\\x3C-\\x5B\\x5D-\\x7E]|\\$\\{[^}\\r\\n\\x00]*\\})*$"
+            "pattern": "^(?:[\\x21\\x23-\\x2B\\x2D-\\x3A\\x3C-\\x5B\\x5D-\\x7E]|\\$\\{[^}\\r\\n\\x00]*\\})*$|^[^\\r\\n\\x00]*\\$\\{expr:[^\\r\\n\\x00]*$"
           },
           "propertyNames": {
             "pattern": "^[!#$%\u0026'*+.^_`|~0-9A-Za-z-]+$"
@@ -1289,6 +1401,22 @@
         "clear_cookies": {
           "type": "boolean",
           "description": "Drop the cookies the virtual user kept from earlier responses before\nthis step's request (default false). Not allowed when the scenario's\nauto_handle_cookies is false, where it has no effect."
+        },
+        "skip_if": {
+          "type": "string",
+          "description": "Skip the step when this expression is true, e.g. \"cart_count == 0\".\nIt is evaluated before the request is built; a skipped step sends\nnothing. Not with only_if."
+        },
+        "only_if": {
+          "type": "string",
+          "description": "Run the step only when this expression is true; otherwise it is\nskipped as with skip_if. Not with skip_if."
+        },
+        "repeat": {
+          "$ref": "#/$defs/Repeat",
+          "description": "Run the step, or a step group's steps, again until an expression is\ntrue, at most max times. Not with foreach, not on a step inside a\nstep group, and not in a run_once or teardown scenario."
+        },
+        "foreach": {
+          "$ref": "#/$defs/Foreach",
+          "description": "Run the step once per element of a list. Not with repeat, not on a\nstep inside a step group, and not in a run_once or teardown scenario."
         }
       },
       "additionalProperties": false,
@@ -1298,6 +1426,48 @@
         "request"
       ],
       "description": "One HTTP request in a scenario."
+    },
+    "StepGroup": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "\\S",
+          "description": "Step name, unique within the scenario, counting step groups and the\nsteps inside them."
+        },
+        "repeat": {
+          "$ref": "#/$defs/Repeat",
+          "description": "Run the step, or a step group's steps, again until an expression is\ntrue, at most max times. Not with foreach, not on a step inside a\nstep group, and not in a run_once or teardown scenario."
+        },
+        "steps": {
+          "items": {
+            "allOf": [
+              {
+                "$ref": "#/$defs/Step"
+              },
+              {
+                "properties": {
+                  "repeat": false,
+                  "foreach": false,
+                  "once_per_vu": {
+                    "const": false
+                  }
+                }
+              }
+            ]
+          },
+          "type": "array",
+          "minItems": 1,
+          "description": "Makes the step a step group: these steps run in order, as one unit,\nunder the group's repeat. A group takes only name, repeat and steps.\nIts steps cannot be groups and take no repeat, foreach or\nonce_per_vu. Not in a run_once or teardown scenario."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name",
+        "repeat",
+        "steps"
+      ],
+      "description": "Steps that run in order as one unit under repeat. A group has no request of its own, and its steps cannot be groups."
     },
     "TLSOptions": {
       "properties": {
@@ -1730,7 +1900,7 @@
     "cookies": {
       "additionalProperties": {
         "type": "string",
-        "pattern": "^(?:[\\x21\\x23-\\x2B\\x2D-\\x3A\\x3C-\\x5B\\x5D-\\x7E]|\\$\\{[^}\\r\\n\\x00]*\\})*$"
+        "pattern": "^(?:[\\x21\\x23-\\x2B\\x2D-\\x3A\\x3C-\\x5B\\x5D-\\x7E]|\\$\\{[^}\\r\\n\\x00]*\\})*$|^[^\\r\\n\\x00]*\\$\\{expr:[^\\r\\n\\x00]*$"
       },
       "propertyNames": {
         "pattern": "^[!#$%\u0026'*+.^_`|~0-9A-Za-z-]+$"

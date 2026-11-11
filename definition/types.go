@@ -1,6 +1,7 @@
 package definition
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -333,7 +334,7 @@ type Scenario struct {
 	// schema_version 2.x, where false opts out; off by default in v1. An
 	// explicit false is kept when the definition is written back.
 	AutoHandleCookies *bool `json:"auto_handle_cookies,omitempty"`
-	// Steps, run in order.
+	// Steps, run in order. A step may be a step group.
 	Steps []Step `json:"steps" jsonschema:"required,minItems=1"`
 	// CSV or JSON data whose columns or keys fill ${name} variables.
 	DataConfig *DataConfig `json:"data_config,omitempty"`
@@ -396,11 +397,13 @@ type DataConfig struct {
 	Mode string `json:"mode,omitempty" jsonschema:"required,enum=sequential,enum=random,enum=unique"`
 }
 
-// Step is one HTTP request in a scenario.
+// Step is one HTTP request in a scenario, or a step group: a step with
+// Steps, which has no request of its own.
 type Step struct {
-	// Step name, unique within the scenario.
+	// Step name, unique within the scenario, counting step groups and the
+	// steps inside them.
 	Name string `json:"name" jsonschema:"required,pattern=\\S"`
-	// The HTTP request to send.
+	// The HTTP request to send. A step group has none.
 	Request Request `json:"request" jsonschema:"required"`
 	// Values to capture from the response into ${variable_name}.
 	Extract []Extract `json:"extract,omitempty"`
@@ -444,6 +447,103 @@ type Step struct {
 	// this step's request (default false). Not allowed when the scenario's
 	// auto_handle_cookies is false, where it has no effect.
 	ClearCookies bool `json:"clear_cookies,omitempty" contract:"v2"`
+	// Skip the step when this expression is true, e.g. "cart_count == 0".
+	// It is evaluated before the request is built; a skipped step sends
+	// nothing. Not with only_if.
+	SkipIf string `json:"skip_if,omitempty" contract:"v2"`
+	// Run the step only when this expression is true; otherwise it is
+	// skipped as with skip_if. Not with skip_if.
+	OnlyIf string `json:"only_if,omitempty" contract:"v2"`
+	// Run the step, or a step group's steps, again until an expression is
+	// true, at most max times. Not with foreach, not on a step inside a
+	// step group, and not in a run_once or teardown scenario.
+	Repeat *Repeat `json:"repeat,omitempty" contract:"v2"`
+	// Run the step once per element of a list. Not with repeat, not on a
+	// step inside a step group, and not in a run_once or teardown scenario.
+	Foreach *Foreach `json:"foreach,omitempty" contract:"v2"`
+	// Makes the step a step group: these steps run in order, as one unit,
+	// under the group's repeat. A group takes only name, repeat and steps.
+	// Its steps cannot be groups and take no repeat, foreach or
+	// once_per_vu. Not in a run_once or teardown scenario.
+	Steps []Step `json:"steps,omitempty" contract:"v2"`
+}
+
+// Repeat runs a step or a step group again until an expression is true.
+type Repeat struct {
+	// Expression that ends the repeat when true, evaluated after each run.
+	Until string `json:"until" jsonschema:"required,pattern=\\S"`
+	// Most runs, from 1 to 1000. Reaching it while until is still false
+	// fails the step.
+	Max int `json:"max" jsonschema:"required,minimum=1,maximum=1000"`
+}
+
+// Foreach runs a step once per element of a list variable.
+type Foreach struct {
+	// Variable that holds the current element, readable as ${var} and in
+	// expressions: ASCII letters, digits and "_", not starting with a
+	// digit, not "env" or "fake", and not a variable the scenario extracts,
+	// a setup global or a vars name.
+	Var string `json:"var" jsonschema:"required,pattern=^[A-Za-z_][A-Za-z0-9_]*$"`
+	// The list: exactly one ${name} reference to a variable that holds a
+	// JSON array, such as one extracted with pick "all".
+	In string `json:"in" jsonschema:"required,pattern=^\\$\\{[A-Za-z0-9_-]+\\}$"`
+}
+
+// IsGroup reports whether the step is a step group: it has steps.
+func (s Step) IsGroup() bool { return len(s.Steps) > 0 }
+
+// MarshalJSON leaves request out of a step group, which has none.
+func (s Step) MarshalJSON() ([]byte, error) {
+	type plain Step
+	var v any = plain(s)
+	if s.IsGroup() {
+		// Declared before plain, Request shadows plain's request without
+		// moving the other keys.
+		v = struct {
+			Request *Request `json:"request,omitempty"`
+			plain
+		}{plain: plain(s)}
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false) // encoding/json escapes again when asked to
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimRight(buf.Bytes(), "\n"), nil
+}
+
+// LeafSteps returns the steps of the scenario that send a request, in
+// document order, with each step group replaced by its steps. The
+// pointers point into s.Steps, so a change through them changes the
+// definition. The groups themselves are the elements of s.Steps whose
+// IsGroup is true.
+func (s Scenario) LeafSteps() []*Step {
+	return appendLeaves(nil, s.Steps)
+}
+
+func appendLeaves(out []*Step, steps []Step) []*Step {
+	for i := range steps {
+		if steps[i].IsGroup() {
+			out = appendLeaves(out, steps[i].Steps)
+			continue
+		}
+		out = append(out, &steps[i])
+	}
+	return out
+}
+
+// forEachLeaf calls fn with each leaf step of steps, in document order,
+// and its path: steps sit under prefix+".steps".
+func forEachLeaf(steps []Step, prefix string, fn func(path string, st *Step)) {
+	for i := range steps {
+		p := indexPath(prefix+".steps", i)
+		if steps[i].IsGroup() {
+			forEachLeaf(steps[i].Steps, p, fn)
+			continue
+		}
+		fn(p, &steps[i])
+	}
 }
 
 // ResponseType is how a step reads its response body.
@@ -621,10 +721,11 @@ const (
 // written. Values and selectors are literal: a ${variable} in them is
 // compared as written, not replaced.
 type Check struct {
-	// Name of the check in results, unique within the step. Without one,
-	// the check is named after its type, selector, operator and value, and
-	// for every type except header that label contains the expected value
-	// as written; give a check whose value is sensitive a name.
+	// Name of the check in results, unique within the step; required for
+	// type assert. Without one, the check is named after its type,
+	// selector, operator and value, and for every type except header that
+	// label contains the expected value as written; give a check whose
+	// value is sensitive a name.
 	Name string `json:"name,omitempty"`
 	// What the check reads: "status" (the status code), "header", "body",
 	// "json" (the body as JSON), "html" (the body as HTML), "timing", "url"
@@ -633,7 +734,8 @@ type Check struct {
 	// header, body, json and html read the final response, and cookie
 	// reads the Set-Cookie headers of the final response and of every
 	// redirect followed to reach it, a later one winning for the same name.
-	Type CheckType `json:"type" jsonschema:"required,enum=status,enum=header,enum=body,enum=json,enum=html,enum=timing,enum=url,enum=cookie"`
+	// "assert" evaluates expr against the response.
+	Type CheckType `json:"type" jsonschema:"required,enum=status,enum=header,enum=body,enum=json,enum=html,enum=timing,enum=url,enum=cookie,enum=assert"`
 	// What to read, by type: the header name for header (case-insensitive;
 	// when the header repeats, any of its values may match), a JSON path
 	// such as "$.data.items[0].id" for json, a CSS selector for html, the
@@ -688,6 +790,9 @@ type Check struct {
 	// timing: the total request time, the same measurement the duration
 	// thresholds use, e.g. "< 500ms".
 	Duration string `json:"duration,omitempty"`
+	// assert: an expression over the response that must be true, e.g.
+	// "status == 200 && duration_ms < 500". It takes no selector.
+	Expr string `json:"expr,omitempty"`
 
 	// What a failure does: "record" counts it toward the check rate only,
 	// "fail" also fails the run, and "abort" fails the run and ends the
