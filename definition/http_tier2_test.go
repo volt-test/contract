@@ -493,7 +493,7 @@ func TestDiscardBodyRules(t *testing.T) {
 			dp + "extract[2] (a json extractor), " + readsBody,
 		}, looser: true},
 		{name: "unknown check type is reported once", doc: step(`"discard_body":true,"checks":[{"type":"","equals":"a"}]`),
-			want: []string{sp0 + `.checks[0].type: is required (one of "status", "header", "body", "json", "html", "timing", "url", "cookie")`}},
+			want: []string{sp0 + `.checks[0].type: is required (one of "status", "header", "body", "json", "html", "timing", "url", "cookie", "assert")`}},
 	})
 }
 
@@ -533,6 +533,7 @@ func TestStepReadsBody(t *testing.T) {
 		`"checks":[{"type":"body","size":"> 0"},{"type":"body","contains":"a"}]`,
 		`"checks":[{"type":"json","selector":"$.a","exists":true}]`,
 		`"checks":[{"type":"html","selector":"h1","exists":true}]`,
+		`"checks":[{"type":"assert","name":"a","expr":"status == 200"}]`,
 		`"extract":[{"variable_name":"v","selector":"$.a","type":"json"}]`,
 		`"extract":[{"variable_name":"v","selector":"(a)","type":"regex"}]`,
 		`"extract":[{"variable_name":"v","selector":"h1","type":"html"}]`,

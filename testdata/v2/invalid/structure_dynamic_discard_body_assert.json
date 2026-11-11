@@ -1,0 +1,27 @@
+{
+  "schema_version": "2.0",
+  "name": "discard_body with assert",
+  "virtual_users": 1,
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Check",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/check"
+          },
+          "discard_body": true,
+          "checks": [
+            {
+              "type": "assert",
+              "name": "ok",
+              "expr": "status == 200"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

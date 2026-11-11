@@ -1,0 +1,20 @@
+{
+  "schema_version": "2.0",
+  "name": "Empty expression",
+  "virtual_users": 1,
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Order",
+          "request": {
+            "method": "POST",
+            "url": "https://shop.example.com/a",
+            "body": "x${expr:}y ${expr:  }"
+          }
+        }
+      ]
+    }
+  ]
+}

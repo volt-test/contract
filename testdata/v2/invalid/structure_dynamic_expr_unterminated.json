@@ -1,0 +1,67 @@
+{
+  "schema_version": "2.0",
+  "name": "Unterminated expressions",
+  "virtual_users": 1,
+  "vars": {
+    "v": "ok ${expr: {\"a\": 1}"
+  },
+  "target": {
+    "base_url": "https://shop.example.com/${expr: \"a\nb\"}"
+  },
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Order",
+          "cookies": {
+            "c": "${expr: 'x"
+          },
+          "request": {
+            "method": "POST",
+            "url": "https://shop.example.com/${expr: qty * price",
+            "headers": {
+              "X-A": "${expr: {\"a\": 1}",
+              "X-B": [
+                "ok",
+                "${expr: \"}\" "
+              ]
+            },
+            "body_type": "multipart",
+            "fields": {
+              "f": "${expr: `}"
+            },
+            "files": {
+              "doc": {
+                "content_base64": "AAAA",
+                "filename": "${expr: name"
+              }
+            }
+          }
+        },
+        {
+          "name": "Loop",
+          "repeat": {
+            "until": "done",
+            "max": 5
+          },
+          "steps": [
+            {
+              "name": "Inner",
+              "request": {
+                "method": "POST",
+                "url": "https://shop.example.com/inner",
+                "body_type": "json",
+                "body_json": {
+                  "a": [
+                    "${expr: \"unterminated }"
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

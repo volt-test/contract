@@ -115,6 +115,11 @@ var v1ReadSet = map[string]string{
 	"scenarios[].vars":                        "v2",
 	"scenarios[].steps[].cookies":             "v2",
 	"scenarios[].steps[].clear_cookies":       "v2",
+	"scenarios[].steps[].skip_if":             "v2",
+	"scenarios[].steps[].only_if":             "v2",
+	"scenarios[].steps[].repeat":              "v2",
+	"scenarios[].steps[].foreach":             "v2",
+	"scenarios[].steps[].steps":               "v2",
 }
 
 type classified struct {
@@ -926,6 +931,61 @@ func TestV1DropsOncePerVUKey(t *testing.T) {
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s: v1 with once_per_vu:\n got %+v\nwant %+v", name, got, want)
+		}
+	}
+}
+
+// TestV1DropsDynamicStepKeys checks that dynamic_steps_ignored.json, a v1
+// definition carrying skip_if, only_if, repeat, foreach and steps (with
+// values v2 refuses), an assert entry with expr in validate and
+// unterminated ${expr: in templates, parses exactly as it does without
+// them, and so do mistyped values and other spellings of the keys.
+// Templates are never scanned in v1.
+func TestV1DropsDynamicStepKeys(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "testdata", "v1", "cli", "dynamic_steps_ignored.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stripped := withoutV2OnlyKeys(t, raw)
+	for _, k := range []string{`"skip_if"`, `"only_if"`, `"repeat"`, `"foreach"`, `"steps":[]`} {
+		if !bytes.Contains(bytes.ReplaceAll(raw, []byte(": "), []byte(":")), []byte(k)) || bytes.Contains(stripped, []byte(k)) {
+			t.Fatalf("the fixture's %s keys were not removed: %s", k, stripped)
+		}
+	}
+	want, err := Parse(stripped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps := want.Scenarios[0].Steps
+	if len(steps) != 2 || steps[0].Request.Body != `${expr: "unterminated }` || steps[1].Request.URL != "https://api.example.com/status" ||
+		steps[1].ThinkTime != "1s" || steps[0].Validate[0].Type != "assert" || steps[0].Extract[0].VariableName != "ids" {
+		t.Fatalf("steps = %+v; the keys next to the dropped ones must still be read", steps)
+	}
+	docs := map[string][]byte{"fixture": raw}
+	for name, keys := range map[string]string{
+		"strings":       `"skip_if":1,"only_if":[],"repeat":"x","foreach":"y","steps":"z",`,
+		"null":          `"skip_if":null,"only_if":null,"repeat":null,"foreach":null,"steps":null,`,
+		"mistyped keys": `"repeat":{"until":1,"max":"5"},"foreach":{"var":[],"in":{}},"steps":[{"name":1,"request":"x"}],`,
+		"case variants": `"Skip_If":"x","ONLY_IF":"y","Repeat":{"until":"a","max":1},"ForEach":{"var":"a","in":"${b}"},"Steps":[{"name":"n"}],`,
+	} {
+		docs["step "+name] = bytes.Replace(stripped, []byte(`"name":"Products"`), []byte(keys+`"name":"Products"`), 1)
+	}
+	for name, doc := range docs {
+		if name != "fixture" && bytes.Equal(doc, stripped) {
+			t.Fatalf("%s: nothing was added: %s", name, doc)
+		}
+		got, err := Parse(doc)
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", name, err, doc)
+		}
+		if !got.IsV1() || len(got.V1TypeProblems) != 0 {
+			t.Errorf("%s: IsV1 %v, V1TypeProblems %v", name, got.IsV1(), got.V1TypeProblems)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: v1 with dynamic step keys:\n got %+v\nwant %+v", name, got, want)
+		}
+		if CloudProblems(got, 1) != nil {
+			t.Errorf("%s: CloudProblems scans a v1 definition", name)
 		}
 	}
 }

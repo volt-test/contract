@@ -33,6 +33,7 @@ var checkRules = map[CheckType]checkRule{
 	CheckTiming: {ops: []string{"duration"}},
 	CheckURL:    {ops: []string{"equals", "contains", "matches"}, stringValue: true, noEmptyContains: true},
 	CheckCookie: {ops: []string{"exists"}, selector: "the cookie name"},
+	CheckAssert: {ops: []string{"expr"}},
 }
 
 // comparisonKinds maps the comparison keys to the kind they compare.
@@ -48,6 +49,9 @@ func validateCheck(ps *problems, p string, c Check) {
 	rule, known := checkRules[c.Type]
 	if c.OnFail != "" {
 		ps.oneOf(p+".on_fail", string(c.OnFail), failModes)
+	}
+	if c.Type == CheckAssert && strings.TrimSpace(c.Name) == "" {
+		ps.add(p+".name", "is required for type assert")
 	}
 	if known {
 		switch {
@@ -73,7 +77,11 @@ func validateCheck(ps *problems, p string, c Check) {
 	}
 	switch len(allowed) {
 	case 0:
-		if len(ops) == 0 {
+		switch {
+		case len(ops) > 0:
+		case c.Type == CheckAssert:
+			ps.add(p+".expr", "is required for type assert")
+		default:
 			ps.add(p, fmt.Sprintf("needs one operator for type %s: %s", c.Type, orList(rule.ops)))
 		}
 	case 1:
@@ -133,6 +141,8 @@ func validateOperator(ps *problems, p string, c Check, op checkOp, rule checkRul
 		}
 	case "is":
 		ps.oneOf(p, op.text, jsonKinds)
+	case "expr":
+		ps.expression(p, op.text)
 	case "count", "size", "duration":
 		if _, err := thresholds.ParseComparison(comparisonKinds[op.key], op.text); err != nil {
 			ps.add(p, strings.TrimPrefix(err.Error(), "thresholds: "))

@@ -1,0 +1,59 @@
+{
+  "name": "v1 definition with dynamic step keys",
+  "virtual_users": 2,
+  "duration": "10s",
+  "scenarios": [
+    {
+      "name": "Shop",
+      "weight": 1,
+      "steps": [
+        {
+          "name": "Products",
+          "skip_if": "count == 0",
+          "only_if": "${expr: {",
+          "repeat": {"until": "", "max": 5000},
+          "foreach": {"var": "env", "in": "${a}${b}"},
+          "request": {
+            "method": "GET",
+            "url": "https://api.example.com/products?page=${expr: iteration % 3 + 1}",
+            "header": {
+              "Accept": "application/json"
+            },
+            "body": "${expr: \"unterminated }"
+          },
+          "extract": [
+            {
+              "variable_name": "ids",
+              "selector": "$.items",
+              "type": "json"
+            }
+          ],
+          "validate": [
+            {
+              "name": "has items",
+              "type": "assert",
+              "expr": "len(ids) > 0",
+              "expected": 200
+            }
+          ]
+        },
+        {
+          "name": "Wait",
+          "repeat": {"until": "ready", "max": 3},
+          "steps": [
+            {
+              "name": "Wait",
+              "steps": [],
+              "request": {"method": "GET", "url": "https://api.example.com/nested"}
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "https://api.example.com/status"
+          },
+          "think_time": "1s"
+        }
+      ]
+    }
+  ]
+}

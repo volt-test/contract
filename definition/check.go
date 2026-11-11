@@ -19,6 +19,7 @@ const (
 	CheckTiming CheckType = "timing"
 	CheckURL    CheckType = "url"
 	CheckCookie CheckType = "cookie"
+	CheckAssert CheckType = "assert"
 )
 
 // FailMode is what a failed check or a missed required extractor does.
@@ -129,7 +130,7 @@ type checkOp struct {
 	key    string
 	codes  []int   // in, not_in, between
 	scalar *Scalar // equals, contains
-	text   string  // not_contains, matches, is, count, size, duration
+	text   string  // not_contains, matches, is, count, size, duration, expr
 	flag   *bool   // exists, missing, empty
 }
 
@@ -194,6 +195,7 @@ func (c Check) operators() []checkOp {
 	text("count", c.Count)
 	text("size", c.Size)
 	text("duration", c.Duration)
+	text("expr", c.Expr)
 	return ops
 }
 

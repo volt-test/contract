@@ -1,0 +1,27 @@
+{
+  "schema_version": "2.0",
+  "name": "Empty group",
+  "virtual_users": 1,
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "First",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/first"
+          }
+        },
+        {
+          "name": "Loop",
+          "repeat": {
+            "until": "done",
+            "max": 5
+          },
+          "steps": []
+        }
+      ]
+    }
+  ]
+}

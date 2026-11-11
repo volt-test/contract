@@ -116,9 +116,9 @@ func TestChecksInvalid(t *testing.T) {
 	}{
 		// Type and operators.
 		{"no type", map[string]any{"in": []any{200}}, []string{
-			check0 + `.type: is required (one of "status", "header", "body", "json", "html", "timing", "url", "cookie")`}},
+			check0 + `.type: is required (one of "status", "header", "body", "json", "html", "timing", "url", "cookie", "assert")`}},
 		{"unknown type", map[string]any{"type": "xml", "exists": true}, []string{
-			check0 + `.type: must be one of "status", "header", "body", "json", "html", "timing", "url", "cookie", got "xml"`}},
+			check0 + `.type: must be one of "status", "header", "body", "json", "html", "timing", "url", "cookie", "assert", got "xml"`}},
 		{"no operator", map[string]any{"type": "status"}, []string{
 			check0 + ": needs one operator for type status: in, not_in or between"}},
 		{"no operator, zero values only", map[string]any{"type": "timing", "duration": ""}, []string{

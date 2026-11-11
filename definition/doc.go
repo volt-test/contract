@@ -19,7 +19,8 @@
 // target.base_url, thresholds, expected_statuses, http, tls, load,
 // cookies and vars at every level, a scenario's run_once, teardown, load
 // and start_at, a step's checks, follow_redirects, max_redirects,
-// once_per_vu, discard_body, response_type and clear_cookies, a request's
+// once_per_vu, discard_body, response_type, clear_cookies, skip_if,
+// only_if, repeat, foreach and steps, a request's
 // body_type, body_json, fields, files, body_base64 and timeout, and an
 // extractor's required, on_fail and pick) are dropped unread. A request's
 // headers stay strings in v1: an array value is a loose type problem, as
@@ -384,6 +385,21 @@
 // "Request bodies" gives the full rules. body_type, body_json, fields,
 // files, body_base64 and header arrays joined schema_version "2.0" while
 // it is a preview.
+//
+// # Dynamic steps (v2)
+//
+// A Step may carry SkipIf or OnlyIf, Repeat or Foreach, and a Check of
+// type CheckAssert carries an Expr. These are bare expressions the engine
+// compiles; Parse checks only that each is non-blank, holds no NUL, does
+// not start with "${" and has no "//" or "/*" outside a quoted string. A
+// step with Steps is a step group (IsGroup): its steps run as one unit
+// under its Repeat, it has no request, and its steps are never groups.
+// MaxForeach caps the passes of one foreach. Scenario.LeafSteps
+// returns the steps that send requests, groups flattened, as pointers
+// into the definition. ScanTemplate reads the ${...} references of a
+// template, a ${expr: ...} expression ending at the "}" that balances its
+// braces outside quoted text. The README section "Dynamic steps" gives
+// the full rules. They joined schema_version "2.0" while it is a preview.
 //
 // # VoltTest Cloud (v2)
 //

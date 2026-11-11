@@ -41,6 +41,7 @@ var unknownFixtures = map[string][]string{
 	"unknown_case_name.json":                 {"Name"},
 	"unknown_case_headers.json":              {"scenarios[0].steps[0].request.Headers"},
 	"unknown_v1_validate.json":               {"scenarios[0].steps[0].validate"},
+	"unknown_dynamic_group_step_key.json":    {"scenarios[0].steps[0].steps[0].bogus"},
 	"unknown_v1_header.json":                 {"scenarios[0].steps[1].request.header"},
 	"unknown_v1_weights_report_type.json":    {"report_type", "weights"},
 	"unknown_v1_cli_keys.json":               {"api_key", "cloud", "cloud_timeout", "existing_test_id", "skip_lookup"},

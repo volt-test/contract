@@ -34,8 +34,9 @@ func validateCookies(ps *problems, p string, cookies map[string]string) {
 }
 
 // literalCookieOctets reports whether every byte of v outside its ${...}
-// references is a cookie-octet (RFC 6265): printable ASCII except space,
-// '"', ',', ';' and '\'.
+// references (see ScanTemplate) is a cookie-octet (RFC 6265): printable
+// ASCII except space, '"', ',', ';' and '\'. A value ScanTemplate cannot
+// read passes: the template rule reports it.
 func literalCookieOctets(v string) bool {
 	ok := true
 	check := func(lit string) {
@@ -46,10 +47,13 @@ func literalCookieOctets(v string) bool {
 		}
 	}
 	last := 0
-	forEachRef(v, func(open, end int) {
-		check(v[last:open])
-		last = end
+	err := scanTemplate(v, func(r TemplateRef) {
+		check(v[last:r.Start])
+		last = r.End
 	})
+	if err != nil {
+		return true
+	}
 	check(v[last:])
 	return ok
 }

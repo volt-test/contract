@@ -1,0 +1,66 @@
+{
+  "schema_version": "2.0",
+  "name": "Loops inside a group",
+  "virtual_users": 1,
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "List",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/list"
+          },
+          "extract": [
+            {
+              "variable_name": "ids",
+              "selector": "$.ids",
+              "type": "json",
+              "pick": "all"
+            }
+          ]
+        },
+        {
+          "name": "Loop",
+          "repeat": {
+            "until": "done",
+            "max": 5
+          },
+          "steps": [
+            {
+              "name": "Inner",
+              "request": {
+                "method": "GET",
+                "url": "https://shop.example.com/inner"
+              },
+              "repeat": {
+                "until": "x",
+                "max": 2
+              }
+            },
+            {
+              "name": "Each",
+              "request": {
+                "method": "GET",
+                "url": "https://shop.example.com/each"
+              },
+              "foreach": {
+                "var": "id",
+                "in": "${ids}"
+              }
+            },
+            {
+              "name": "Once",
+              "request": {
+                "method": "GET",
+                "url": "https://shop.example.com/once"
+              },
+              "once_per_vu": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

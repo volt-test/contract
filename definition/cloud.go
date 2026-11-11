@@ -20,16 +20,18 @@ const (
 //
 //   - a tls client_cert, client_key or ca_cert that is a file path, not
 //     inline PEM;
-//   - binary request content, per step: the request body_base64, then each
+//   - binary request content, per leaf step (steps inside step groups
+//     included, at their own paths): the request body_base64, then each
 //     multipart file's path or content_base64, by field name. Cloud
 //     nodes cannot receive file content yet;
 //   - each distinct ${env.*} reference at each path where it is written:
 //     target.base_url, each test-level cookie and then var (each sorted by
-//     name), then per scenario its cookies and vars, and per step the
+//     name), then per scenario its cookies and vars, and per leaf step the
 //     request url, body, each body_json string value, each fields value,
 //     each multipart file's filename (by field name), each header (sorted
 //     by name) and the step's cookies.
-//     Keys, field names and cookie and var names are not scanned;
+//     Keys, field names and cookie and var names are not scanned, and
+//     neither are ${expr: ...} bodies (see ScanTemplate);
 //   - each run_once and each teardown scenario.
 //
 // A scenario's own load and start_at are not refused here. No current
@@ -54,8 +56,8 @@ func CloudProblems(d *Definition, nodes int) []Problem {
 		}
 	}
 	for i, sc := range d.Scenarios {
-		for j, st := range sc.Steps {
-			rp := indexPath(indexPath("scenarios", i)+".steps", j) + ".request"
+		forEachLeaf(sc.Steps, indexPath("scenarios", i), func(sp string, st *Step) {
+			rp := sp + ".request"
 			r := st.Request
 			if r.BodyBase64 != "" {
 				ps = append(ps, Problem{Path: rp + ".body_base64", Message: cloudBinaryMessage})
@@ -69,9 +71,9 @@ func CloudProblems(d *Definition, nodes int) []Problem {
 					ps = append(ps, Problem{Path: fp + ".content_base64", Message: cloudBinaryMessage})
 				}
 			}
-		}
+		})
 	}
-	ps = cloudEnvProblems(ps, d)
+	forEachTemplate(d, func(path, src string) { ps = appendEnvRefs(ps, path, src) })
 	for i, sc := range d.Scenarios {
 		sp := indexPath("scenarios", i)
 		if sc.RunOnce {
@@ -84,66 +86,64 @@ func CloudProblems(d *Definition, nodes int) []Problem {
 	return ps
 }
 
-func cloudEnvProblems(ps []Problem, d *Definition) []Problem {
+// forEachTemplate calls fn with each template value of d and its path, in
+// the order CloudProblems lists ${env.*} references.
+func forEachTemplate(d *Definition, fn func(path, src string)) {
 	if d.Target != nil {
-		ps = appendEnvRefs(ps, "target.base_url", d.Target.BaseURL)
+		fn("target.base_url", d.Target.BaseURL)
 	}
-	ps = appendMapEnvRefs(ps, "cookies", d.Cookies)
-	ps = appendMapEnvRefs(ps, "vars", d.Vars)
+	forEachMapValue("cookies", d.Cookies, fn)
+	forEachMapValue("vars", d.Vars, fn)
 	for i, sc := range d.Scenarios {
 		sp := indexPath("scenarios", i)
-		ps = appendMapEnvRefs(ps, sp+".cookies", sc.Cookies)
-		ps = appendMapEnvRefs(ps, sp+".vars", sc.Vars)
-		for j, st := range sc.Steps {
-			rp := indexPath(indexPath("scenarios", i)+".steps", j) + ".request"
+		forEachMapValue(sp+".cookies", sc.Cookies, fn)
+		forEachMapValue(sp+".vars", sc.Vars, fn)
+		forEachLeaf(sc.Steps, sp, func(stp string, st *Step) {
+			rp := stp + ".request"
 			r := st.Request
-			ps = appendEnvRefs(ps, rp+".url", r.URL)
-			ps = appendEnvRefs(ps, rp+".body", r.Body)
+			fn(rp+".url", r.URL)
+			fn(rp+".body", r.Body)
 			if len(r.BodyJSON) > 0 {
 				// Parse has checked body_json; a decode error ends the walk.
-				_ = forEachJSONString(r.BodyJSON, rp+".body_json", func(path, s string) {
-					ps = appendEnvRefs(ps, path, s)
-				})
+				_ = forEachJSONString(r.BodyJSON, rp+".body_json", fn)
 			}
 			for _, f := range r.Fields {
-				ps = appendEnvRefs(ps, joinPath(rp+".fields", f.Name), f.Value)
+				fn(joinPath(rp+".fields", f.Name), f.Value)
 			}
 			for _, name := range slices.Sorted(maps.Keys(r.Files)) {
-				ps = appendEnvRefs(ps, joinPath(rp+".files", name)+".filename", r.Files[name].Filename)
+				fn(joinPath(rp+".files", name)+".filename", r.Files[name].Filename)
 			}
 			for _, name := range slices.Sorted(maps.Keys(r.Headers)) {
-				// One value is reported at the header, as it marshals;
-				// several at their index.
 				hp, vs := joinPath(rp+".headers", name), r.Headers[name]
 				if len(vs) == 1 {
-					ps = appendEnvRefs(ps, hp, vs[0])
+					fn(hp, vs[0])
 					continue
 				}
 				for k, v := range vs {
-					ps = appendEnvRefs(ps, indexPath(hp, k), v)
+					fn(indexPath(hp, k), v)
 				}
 			}
-			ps = appendMapEnvRefs(ps, indexPath(sp+".steps", j)+".cookies", st.Cookies)
-		}
+			forEachMapValue(stp+".cookies", st.Cookies, fn)
+		})
 	}
-	return ps
 }
 
-// appendMapEnvRefs appends the ${env.*} references in the values of m at
-// p, by sorted key.
-func appendMapEnvRefs(ps []Problem, p string, m map[string]string) []Problem {
+// forEachMapValue calls fn with each value of m and its path under p, by
+// sorted key.
+func forEachMapValue(p string, m map[string]string, fn func(path, src string)) {
 	for _, k := range slices.Sorted(maps.Keys(m)) {
-		ps = appendEnvRefs(ps, joinPath(p, k), m[k])
+		fn(joinPath(p, k), m[k])
 	}
-	return ps
 }
 
 // appendEnvRefs appends a problem at path for each distinct ${env.*}
-// reference in src, as written and in source order.
+// reference in src, as written and in source order. ${expr: ...} bodies
+// are not scanned; after an expression ScanTemplate cannot read, the rest
+// of src is not scanned either.
 func appendEnvRefs(ps []Problem, path, src string) []Problem {
 	var seen map[string]bool
-	forEachRef(src, func(open, end int) {
-		if ref := src[open:end]; strings.HasPrefix(ref[2:], "env.") && !seen[ref] {
+	_ = scanTemplate(src, func(r TemplateRef) {
+		if ref := src[r.Start:r.End]; !r.Expr && strings.HasPrefix(ref[2:], "env.") && !seen[ref] {
 			if seen == nil {
 				seen = map[string]bool{}
 			}
@@ -152,27 +152,6 @@ func appendEnvRefs(ps []Problem, path, src string) []Problem {
 		}
 	})
 	return ps
-}
-
-// forEachRef calls fn with the bounds of each ${...} reference in src, in
-// source order: src[open:end] is the reference, braces included. A
-// reference runs from ${ to the first }; without a } the rest of src is
-// literal.
-func forEachRef(src string, fn func(open, end int)) {
-	for i := 0; i < len(src); {
-		open := strings.Index(src[i:], "${")
-		if open < 0 {
-			return
-		}
-		open += i
-		end := strings.IndexByte(src[open+2:], '}')
-		if end < 0 {
-			return
-		}
-		end += open + 3
-		fn(open, end)
-		i = end
-	}
 }
 
 // forEachJSONString calls fn with each string value in body, a JSON object

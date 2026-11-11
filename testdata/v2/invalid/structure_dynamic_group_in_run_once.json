@@ -1,0 +1,69 @@
+{
+  "schema_version": "2.0",
+  "name": "Loops in setup",
+  "virtual_users": 1,
+  "scenarios": [
+    {
+      "name": "Seed",
+      "run_once": true,
+      "steps": [
+        {
+          "name": "Wait",
+          "repeat": {
+            "until": "done",
+            "max": 5
+          },
+          "steps": [
+            {
+              "name": "Ready",
+              "request": {
+                "method": "GET",
+                "url": "https://shop.example.com/ready"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Poll",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/poll"
+          },
+          "repeat": {
+            "until": "ok",
+            "max": 3
+          }
+        }
+      ]
+    },
+    {
+      "name": "Clean",
+      "teardown": true,
+      "steps": [
+        {
+          "name": "Each",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/each"
+          },
+          "foreach": {
+            "var": "id",
+            "in": "${ids}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Browse",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/browse"
+          }
+        }
+      ]
+    }
+  ]
+}

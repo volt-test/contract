@@ -47,8 +47,11 @@ v2 and later definitions carry `schema_version` as a `"MAJOR.MINOR"` string.
   load](#scenario-load) (a scenario's `load` and `start_at`, and the
   `constant` and `stages` load types), [preset cookies and
   variables](#cookies-and-variables) (`cookies` at every level, a step's
-  `clear_cookies`, `vars`) and [JSON data files](#json-data-files)
-  (`data_format: "json"`) joined `"2.0"` under this rule.
+  `clear_cookies`, `vars`), [JSON data files](#json-data-files)
+  (`data_format: "json"`) and [dynamic steps](#dynamic-steps) (a step's
+  `skip_if`, `only_if`, `repeat`, `foreach` and `steps`, the `assert`
+  check type with `expr`, and `${expr: ...}` in templates) joined `"2.0"`
+  under this rule.
 - A reader rejects an unknown major, or a minor newer than it supports.
 
 The module version and `schema_version` move independently: schema `"2.0"`
@@ -62,7 +65,8 @@ does not mean module v2.
   `schema_version` (exact spelling and case), values must have the right
   JSON type, and the structure is validated:
   - a name, and at least one scenario with at least one step;
-  - unique scenario names, and unique step names within a scenario;
+  - unique scenario names, and unique step names within a scenario,
+    counting step groups and the steps inside them;
   - durations that parse ("30s", "1m30s"), and a `think_time` that is a
     duration or a range such as "1s-3s" (see [Think time](#think-time));
   - a load model: non-empty `stages`, `virtual_users` (at least 1) with
@@ -118,7 +122,14 @@ does not mean module v2.
     at most `1gib`, timeouts durations above zero, no check or extractor
     that reads a body `discard_body` drops, and no json or html check or
     extractor with `response_type: "binary"` (see [Response
-    bodies](#response-bodies)).
+    bodies](#response-bodies));
+  - dynamic steps: non-blank expressions, not `skip_if` and `only_if`
+    together, a `repeat` with `until` and a `max` from 1 to 1000, a
+    `foreach` over one `${name}`, not `repeat` and `foreach` together, step
+    groups one level deep with only `name`, `repeat` and `steps`, no loop
+    in a `run_once` or `teardown` scenario, and every `${expr: ...}` in a
+    template closed, not empty and without comments (see [Dynamic
+    steps](#dynamic-steps)).
 - **v1** is read the way the v1 readers (the CLI, the cloud engine and the
   backend) read it. Unknown keys are ignored, keys match case-insensitively,
   and v2-only keys (`target.base_url`, `thresholds` at every level,
@@ -126,7 +137,8 @@ does not mean module v2.
   every level, a scenario's `run_once`, `teardown`, `load` and
   `start_at`, a step's `checks`,
   `follow_redirects`, `max_redirects`, `once_per_vu`, `discard_body`,
-  `response_type` and `clear_cookies`, a request's `body_type`,
+  `response_type`, `clear_cookies`, `skip_if`, `only_if`, `repeat`,
+  `foreach` and `steps`, a request's `body_type`,
   `body_json`, `fields`, `files`, `body_base64` and `timeout`, and an
   extractor's `required`, `on_fail` and `pick`) are dropped unread,
   whatever their value. `data_format` is a v1 field: v1 keeps any value,
@@ -378,6 +390,7 @@ optional `name` and `on_fail`.
 | `timing` | none | `duration` | |
 | `url` | none | `equals`, `contains`, `matches` | a string |
 | `cookie` | the cookie name | `exists` | |
+| `assert` | none | `expr` (see [Dynamic steps](#dynamic-steps)) | |
 
 - `in` and `not_in` are lists of status codes; `between` is `[low, high]`,
   both included, with `low <= high`. Codes run from 100 to 599.
@@ -935,9 +948,11 @@ types joined schema_version "2.0" while it is a preview.
   written, so a name cannot be a `${...}` reference.
 - **Cookie values** are RFC 6265 cookie-octets in their literal text: no
   space, `"`, `,`, `;`, `\`, control character or non-ASCII. Text inside a
-  `${...}` reference (from `${` to the first `}`) is exempt; the engine
-  checks the resolved value when it sends the request. CR, LF
-  and NUL are refused anywhere. An empty value is allowed.
+  `${...}` reference (from `${` to the first `}`, or a whole `${expr: ...}`
+  expression, see [Templates](#templates)) is exempt; the engine checks
+  the resolved value when it sends the request. CR, LF and NUL are
+  refused anywhere. An empty value is allowed. The published schema lets
+  a value with a `${expr:` through whole.
 - **`clear_cookies: true`** on a step drops the cookies the virtual user
   kept from earlier responses before that step's request. `Parse` refuses
   it in a scenario with `auto_handle_cookies: false`, where it has no
@@ -1275,6 +1290,114 @@ is a preview, and so did `multipart`, `files` and `body_base64`.
   multipart body with `fields` only is fine. See
   [VoltTest Cloud](#volttest-cloud).
 
+## Dynamic steps
+
+A step can be skipped, repeated or run once per element of a list, steps
+can repeat as a group, a check can assert an expression, and a template
+can compute a value with `${expr: ...}`.
+
+```json
+"steps": [
+  {"name": "Products", "request": {"method": "GET", "url": "https://shop.example.com/api/products"},
+   "extract": [{"variable_name": "ids", "selector": "$.items[*].id", "type": "json", "pick": "all"}],
+   "checks": [{"type": "assert", "name": "has products", "expr": "status == 200 && len(ids) > 0"}]},
+  {"name": "Product", "foreach": {"var": "id", "in": "${ids}"},
+   "request": {"method": "GET", "url": "https://shop.example.com/api/products/${id}"}},
+  {"name": "Add to cart", "skip_if": "len(ids) == 0",
+   "request": {"method": "POST", "url": "https://shop.example.com/api/cart", "body_type": "json",
+               "body_json": {"qty": "${expr: iteration % 3 + 1}"}}},
+  {"name": "Wait for order", "repeat": {"until": "order_status == \"ready\"", "max": 50},
+   "steps": [
+     {"name": "Order status", "request": {"method": "GET", "url": "https://shop.example.com/api/order"},
+      "extract": [{"variable_name": "order_status", "selector": "$.status", "type": "json"}]}
+   ]}
+]
+```
+
+### Expressions
+
+`skip_if`, `only_if`, `repeat.until` and an `assert` check's `expr` are
+bare expressions, such as `count > 0`, written without `${...}`. The
+engine compiles them with [expr-lang/expr](https://expr-lang.org) when
+the test loads; the contract checks only that each is non-blank, holds no
+NUL, does not start with `${` and has no `//` or `/*` outside a quoted
+string (expr-lang reads them as comments). What an expression can read (the
+variables, `status`, `body`, `json(path)`, `header(name)`,
+`cookie(name)`, `duration_ms`) is defined by the engine.
+
+- **`skip_if` / `only_if`.** Evaluated before the step's request is
+  built. A step skipped by `skip_if` being true, or by `only_if` being
+  false, sends nothing. Not both on one step.
+- **`assert`.** A check `{"type": "assert", "name": ..., "expr": ...}`
+  evaluated after the response. It requires `name` and `expr`, takes no
+  selector and no other operator, and takes `on_fail` like any check
+  (default `record`). An `assert` counts as reading the response body:
+  `discard_body: true` is refused on its step, and `http.discard_bodies`
+  keeps that step's body.
+- **`repeat`.** `{"until": "<expression>", "max": N}` runs the step again
+  until `until` is true, at most `max` times (1 to 1000, required).
+  Reaching `max` with `until` still false fails the step.
+- **`foreach`.** `{"var": "id", "in": "${ids}"}` runs the step once per
+  element of the list `in` names, with the element in `${id}`. `in` is
+  exactly one `${name}` reference; `var` is an identifier an expression
+  can read (ASCII letters, digits and `_`, not starting with a digit, so
+  no `-`), not `env` or `fake`, not a variable the scenario extracts, a
+  setup global or a `vars` name, and not the variable `in` reads. Not
+  with `repeat`. The engine runs at most 1000 passes per `foreach`
+  (`definition.MaxForeach`).
+- `repeat` and `foreach` are refused in a `run_once` or `teardown`
+  scenario; `skip_if` and `only_if` are allowed there.
+
+### Step groups
+
+A step with `steps` is a step group: its steps run in order as one unit
+under the group's `repeat`, which is required. A group takes only
+`name`, `repeat` and `steps` (`Parse` refuses any other key on it,
+`request` included, whatever its value), and its steps:
+
+- are ordinary steps with a request, never groups: a group holds one
+  level of steps;
+- take no `repeat`, `foreach` or `once_per_vu`;
+- keep their own names, unique across the scenario together with the
+  groups, so results stay flat.
+
+A group is not allowed in a `run_once` or `teardown` scenario. `"steps":
+[]` is refused, not read as absent.
+
+In Go, `Scenario.LeafSteps()` returns the steps that send requests, in
+document order, each group replaced by its steps, as pointers into the
+definition, so a change through them (redaction, for example) changes
+the definition. Groups are the elements of `Scenario.Steps` whose
+`IsGroup()` is true. A group marshals without `request`.
+
+### Templates
+
+A template value (a request's `url`, `body`, header values, the string
+values of `body_json`, the values of `fields`, multipart file names,
+cookie values, `vars` values and `target.base_url`) may hold
+`${expr: <expression>}`, whose value the engine computes, e.g.
+`${expr: qty * price}` or `${expr: type == "single" ? {"id": id} : {"value": 1}}`.
+`definition.ScanTemplate` reads a template's references in source order,
+the same way for every reader:
+
+- A reference that starts with exactly `${expr:` is an expression. It
+  ends at the `}` that balances its braces; braces inside `'...'`,
+  `"..."` and `` `...` `` literals do not count, a backslash inside
+  `'...'` and `"..."` escapes the next character, and a line feed inside
+  them, escaped or not, leaves the literal unterminated, as in expr-lang.
+  `${` inside an expression is plain text.
+- Every other reference, `${exprx}` and `${ expr: x}` included, runs from
+  `${` to the first `}`, as before; without a `}` the rest is literal.
+  There is no escape for `${`.
+- `Parse` refuses, in v2, an expression that is not closed, holds only
+  white space, or has `//` or `/*` outside a quoted string (expr-lang
+  reads them as comments, so `${expr: a // } + 1}` would end early), at
+  the path of the value. v1 templates are never scanned for expressions.
+- `${env.NAME}` is not looked for inside an expression; expressions
+  cannot read environment variables.
+
+Dynamic steps joined schema_version "2.0" while it is a preview.
+
 ## VoltTest Cloud
 
 A definition that `Parse` accepts can still be refused by VoltTest Cloud.
@@ -1310,8 +1433,13 @@ It reports, in this order:
    name (`headers.X-A` for one value, `headers.X-A[1]` for the second of
    several), and the step's `cookies` values.
    A reference runs from `${` to the first `}`; an unterminated `${env.X`
-   is literal. Keys in `body_json`, names in `fields` and cookie and
-   variable names are not refused.
+   is literal. A `${expr: ...}` expression is not scanned: expressions
+   cannot read environment variables (see [Templates](#templates)). Keys
+   in `body_json`, names in `fields` and cookie and variable names are
+   not refused.
+   Steps inside a [step group](#step-groups) are scanned at their own
+   paths, such as `scenarios[0].steps[2].steps[0].request.url`, here and
+   for binary content.
 4. **Setup and teardown.** Each `run_once` and each `teardown` scenario,
    at that flag.
 
