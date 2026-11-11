@@ -28,7 +28,9 @@ func v2OnlyDropped(path string) bool {
 		"scenarios[].steps[].max_redirects", "scenarios[].steps[].once_per_vu", "load",
 		"scenarios[].steps[].request.body_type", "scenarios[].steps[].request.body_json", "scenarios[].steps[].request.fields",
 		"scenarios[].steps[].request.files", "scenarios[].steps[].request.body_base64", "scenarios[].steps[].request.timeout",
-		"scenarios[].steps[].discard_body", "scenarios[].steps[].response_type"} {
+		"scenarios[].steps[].discard_body", "scenarios[].steps[].response_type", "cookies", "vars", "scenarios[].load",
+		"scenarios[].start_at", "scenarios[].cookies", "scenarios[].vars", "scenarios[].steps[].cookies",
+		"scenarios[].steps[].clear_cookies"} {
 		if p == prefix || strings.HasPrefix(p, prefix+".") || strings.HasPrefix(p, prefix+"[") {
 			return true
 		}

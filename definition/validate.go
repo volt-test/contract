@@ -11,7 +11,7 @@ import (
 // same values; a test keeps them in step.
 var (
 	extractTypes = []string{"json", "regex", "header", "cookie", "html"}
-	dataFormats  = []string{"csv"}
+	dataFormats  = []string{"csv", "json"}
 	dataModes    = []string{"sequential", "random", "unique"}
 	checkTypes   = []string{string(CheckStatus), string(CheckHeader), string(CheckBody), string(CheckJSON),
 		string(CheckHTML), string(CheckTiming), string(CheckURL), string(CheckCookie)}
@@ -39,8 +39,24 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 	ps.duration("http_timeout", d.HTTPTimeout)
 	// Load model: load alone, non-empty stages, or virtual_users (at least
 	// 1) with optional duration and ramp_up. Without duration each virtual
-	// user runs its scenario once. Zero values count as absent.
-	if d.Load != nil {
+	// user runs its scenario once. Zero values count as absent. When every
+	// load scenario has its own load, there is none.
+	if ownLoadOnly(d) {
+		for _, k := range []struct {
+			key string
+			set bool
+		}{
+			{"virtual_users", d.VirtualUsers != 0},
+			{"duration", d.Duration != ""},
+			{"ramp_up", d.RampUp != ""},
+			{"stages", len(d.Stages) > 0},
+			{"load", d.Load != nil},
+		} {
+			if k.set {
+				ps.add(k.key, unusedTopLoadMessage)
+			}
+		}
+	} else if d.Load != nil {
 		validateLoad(&ps, d)
 	} else if len(d.Stages) > 0 {
 		if d.VirtualUsers != 0 {
@@ -86,6 +102,8 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 
 	validateHTTPTLS(&ps, d)
 	follows := httpFollows(d)
+	validateCookies(&ps, "cookies", d.Cookies)
+	validateVars(&ps, "vars", d.Vars)
 
 	for i, r := range d.RegionConfig {
 		p := "region_config[" + strconv.Itoa(i) + "]"
@@ -106,6 +124,9 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 		ps.uniqueName(p, sc.Name, scenarioNames, i, "scenarios")
 		ps.nonNegative(p+".weight", sc.Weight)
 		validateSetupTeardown(&ps, p, sc)
+		validateOwnLoad(&ps, p, sc)
+		validateCookies(&ps, p+".cookies", sc.Cookies)
+		validateVars(&ps, p+".vars", sc.Vars)
 		ps.thinkTime(p+".think_time", sc.ThinkTime)
 		if sc.DataConfig != nil {
 			validateDataConfig(&ps, p+".data_config", sc.DataConfig)
@@ -118,6 +139,10 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 			sp := p + ".steps[" + strconv.Itoa(j) + "]"
 			ps.uniqueName(sp, st.Name, stepNames, j, p+".steps")
 			ps.thinkTime(sp+".think_time", st.ThinkTime)
+			validateCookies(&ps, sp+".cookies", st.Cookies)
+			if st.ClearCookies && sc.AutoHandleCookies != nil && !*sc.AutoHandleCookies {
+				ps.add(sp+".clear_cookies", "has no effect when auto_handle_cookies is false")
+			}
 			if strings.TrimSpace(st.Request.Method) == "" {
 				ps.add(sp+".request.method", "is required")
 			}
@@ -244,6 +269,30 @@ func validateSetupTeardown(ps *problems, p string, sc Scenario) {
 	}
 }
 
+// validateOwnLoad applies the rules for a scenario's own load and
+// start_at: no load on a run_once or teardown scenario, no weight next to
+// a load, and start_at, greater than zero, only with a load.
+func validateOwnLoad(ps *problems, p string, sc Scenario) {
+	if sc.Load != nil {
+		validateScenarioLoad(ps, p, sc.Load)
+		switch {
+		case sc.RunOnce:
+			ps.add(p+".load", "does not apply to a run_once scenario, which runs once")
+		case sc.Teardown:
+			ps.add(p+".load", "does not apply to a teardown scenario, which runs once")
+		case sc.Weight > 0:
+			ps.add(p+".weight", "does not apply to a scenario with its own load, which is never picked by weight")
+		}
+	}
+	if sc.StartAt != "" {
+		if sc.Load == nil {
+			ps.add(p+".start_at", "needs a load on this scenario")
+		} else {
+			ps.positiveDuration(p+".start_at", sc.StartAt, "; leave it out to start with the load")
+		}
+	}
+}
+
 // validateOncePerVU rejects once_per_vu on a step of a run_once or
 // teardown scenario, which runs once anyway. false reads as absent.
 func validateOncePerVU(ps *problems, sp string, sc Scenario, st Step) {
@@ -304,6 +353,9 @@ func hasLoadScenario(scenarios []Scenario) bool {
 func validateDataConfig(ps *problems, p string, dc *DataConfig) {
 	ps.oneOf(p+".data_format", dc.DataFormat, dataFormats)
 	ps.oneOf(p+".mode", dc.Mode, dataModes)
+	if dc.HasHeader && dc.DataFormat == "json" {
+		ps.add(p+".has_header", `only applies to data_format "csv"`)
+	}
 	if dc.DataSource == "" && dc.DataContent == "" && dc.DataDownloadURL == "" {
 		ps.add(p+".data_source", "is required")
 	}

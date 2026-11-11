@@ -43,7 +43,12 @@ v2 and later definitions carry `schema_version` as a `"MAJOR.MINOR"` string.
   (`http.max_body_size`, `http.discard_bodies`, a step's `discard_body`
   and `response_type`) and the [connection timeouts](#timeouts)
   (`http.connect_timeout`, `http.tls_handshake_timeout`,
-  `http.response_header_timeout`) joined `"2.0"` under this rule.
+  `http.response_header_timeout`), a [scenario's own
+  load](#scenario-load) (a scenario's `load` and `start_at`, and the
+  `constant` and `stages` load types), [preset cookies and
+  variables](#cookies-and-variables) (`cookies` at every level, a step's
+  `clear_cookies`, `vars`) and [JSON data files](#json-data-files)
+  (`data_format: "json"`) joined `"2.0"` under this rule.
 - A reader rejects an unknown major, or a minor newer than it supports.
 
 The module version and `schema_version` move independently: schema `"2.0"`
@@ -62,10 +67,15 @@ does not mean module v2.
     duration or a range such as "1s-3s" (see [Think time](#think-time));
   - a load model: non-empty `stages`, `virtual_users` (at least 1) with
     optional `duration` and `ramp_up`, or a `load` object (see
-    [Arrival-rate load](#arrival-rate-load)), exactly one of them. Without
-    `duration` each virtual user runs its scenario once; a `duration` that
-    is present must be greater than zero, and so must every stage's
-    `duration`;
+    [Arrival-rate load](#arrival-rate-load)), exactly one of them, or none
+    of them when every load scenario has its own `load` (see [Scenario
+    load](#scenario-load)). Without `duration` each virtual user runs its
+    scenario once; a `duration` that is present must be greater than
+    zero, and so must every stage's `duration`;
+  - a scenario's own `load`: a known type with at least one virtual user,
+    a rate of at least 1 or a stage target above 0, no `weight`, not on a
+    `run_once` or `teardown` scenario, and `start_at` (a duration greater
+    than zero) only next to it (see [Scenario load](#scenario-load));
   - `run_once` and `teardown` not both on one scenario, no `weight` on
     either, at least one load scenario, and no other scenario extracting a
     variable a `run_once` scenario sets (see [Setup and
@@ -73,9 +83,15 @@ does not mean module v2.
   - `once_per_vu` not on a step of a `run_once` or `teardown` scenario,
     and at least one step without it in every load scenario (see
     [Once-per-VU steps](#once-per-vu-steps));
-  - known extractor types, data formats and data modes, and an
+  - known extractor types, data formats and data modes, `has_header` only
+    with `data_format: "csv"`, and an
     extractor's `pick` from its list, on `json`, `regex` and `html`
     extractors only (see [Extracting from arrays](#extracting-from-arrays));
+  - cookie names that are HTTP tokens, cookie values of cookie-octets
+    outside `${...}` references and without CR, LF or NUL anywhere,
+    `clear_cookies` not in a scenario with `auto_handle_cookies: false`,
+    and variable names of ASCII letters, digits, `_` and `-`, other than
+    `env` and `fake` (see [Cookies and variables](#cookies-and-variables));
   - thresholds: every expression parses, each metric is allowed at its
     scope, and `delay_abort` is a non-negative duration set only with
     `abort_on_fail: true` (see [Thresholds](#thresholds));
@@ -106,12 +122,15 @@ does not mean module v2.
 - **v1** is read the way the v1 readers (the CLI, the cloud engine and the
   backend) read it. Unknown keys are ignored, keys match case-insensitively,
   and v2-only keys (`target.base_url`, `thresholds` at every level,
-  `expected_statuses`, `http`, `tls`, `load`, a scenario's `run_once` and
-  `teardown`, a step's `checks`,
-  `follow_redirects`, `max_redirects`, `once_per_vu`, `discard_body` and
-  `response_type`, a request's `body_type`, `body_json`, `fields`, `files`,
-  `body_base64` and `timeout`, and an extractor's `required`, `on_fail`
-  and `pick`) are dropped unread, whatever their value. A header value is
+  `expected_statuses`, `http`, `tls`, `load`, `cookies` and `vars` at
+  every level, a scenario's `run_once`, `teardown`, `load` and
+  `start_at`, a step's `checks`,
+  `follow_redirects`, `max_redirects`, `once_per_vu`, `discard_body`,
+  `response_type` and `clear_cookies`, a request's `body_type`,
+  `body_json`, `fields`, `files`, `body_base64` and `timeout`, and an
+  extractor's `required`, `on_fail` and `pick`) are dropped unread,
+  whatever their value. `data_format` is a v1 field: v1 keeps any value,
+  `"json"` included, as written, unchecked. A header value is
   a string in v1: an array is a type problem in a loose field, as below,
   exactly as before arrays joined v2. Values are checked for their JSON
   type only:
@@ -180,8 +199,10 @@ labels. For the HTTP and TLS options it also checks the rules that span
 keys or levels (a step's `max_redirects` against the `follow_redirects`
 in effect for it, `client_cert` and `client_key` together), the PEM
 contents of `client_cert`, `client_key` and `ca_cert`, and blank or
-multi-line file paths. For `load` it also checks that durations are
-greater than zero and that `max_vus` is at least `preallocated_vus`. For
+multi-line file paths. For `load`, at both levels, it also checks that
+durations are greater than zero and that `max_vus` is at least
+`preallocated_vus`, and for a scenario that `start_at` is a duration
+greater than zero. For
 `fields` it also checks that each name appears once (a JSON Schema
 validator reads a repeated key as its last value). For headers, files and
 binary bodies it also checks the `Host` and `Content-Type` rules (header
@@ -804,6 +825,151 @@ response times. It replaces `virtual_users`, `duration`, `ramp_up` and
 - There is no `start_rate`.
 - `Parse` leaves the defaults to the reader: `time_unit` stays `""` and
   `max_vus` stays `0`.
+- The test-level `load` takes `"rate"` and `"ramping_rate"` only.
+  `"constant"` and `"stages"` are for a [scenario's own
+  load](#scenario-load); at the top level `Parse` refuses them at
+  `load.type`.
+
+## Scenario load
+
+A scenario with a `load` runs its own pool of virtual users (or its own
+arrival rate) alongside the test-level load model, independent of it: the
+test-level virtual users never pick it, and its virtual users run only
+this scenario. `start_at` delays its start.
+
+```json
+"scenarios": [
+  {"name": "Browse", "weight": 1, "steps": [...]},
+  {
+    "name": "Checkout",
+    "start_at": "30s",
+    "load": {"type": "constant", "virtual_users": 5, "duration": "2m"},
+    "steps": [...]
+  },
+  {
+    "name": "Spike",
+    "load": {"type": "stages", "stages": [
+      {"duration": "30s", "target": 50},
+      {"duration": "30s", "target": 0}
+    ]},
+    "steps": [...]
+  }
+]
+```
+
+| `type` | Required | Meaning |
+|---|---|---|
+| `"constant"` | `virtual_users`, `duration` | `virtual_users` (at least 1) run the scenario for `duration` (greater than zero). There is no `ramp_up`; use `"stages"` to ramp. |
+| `"stages"` | `stages` | The number of virtual users starts at 0 and moves linearly to each stage's `target` over that stage's `duration`. At least one `target` must be above 0. |
+| `"rate"`, `"ramping_rate"` | as in [Arrival-rate load](#arrival-rate-load) | The scenario's own arrival rate, with the same keys and rules. |
+
+- Each type takes only its own keys: `"constant"` takes no `rate`,
+  `time_unit`, `stages`, `preallocated_vus` or `max_vus`; `"stages"` no
+  `rate`, `time_unit`, `duration`, `virtual_users`, `preallocated_vus` or
+  `max_vus`; the arrival-rate types no `virtual_users`. Each may still be
+  written with its zero value.
+- There is no pool of 0 virtual users: a `"constant"` load needs at
+  least 1, and a `"stages"` load whose every `target` is 0 is refused at
+  `load`: "never exceeds 0 virtual users, so the scenario would do
+  nothing; set a stage target above 0".
+- **`start_at`** is how long after the load starts (after setup) the
+  scenario's own load starts, as a duration greater than zero, with no
+  upper bound; absent, it starts with the load. The scenario sends
+  nothing before then. It needs a `load` on the same scenario.
+- **Run length.** A run lasts until every scenario ends: the latest
+  `start_at` plus the pool's length over the pools (`duration`, or the
+  sum of the stage durations), and the test-level model's length for the
+  scenarios that share it.
+- **Weight.** A scenario with a `load` takes no `weight` (0 reads as
+  absent).
+- **Setup and teardown.** A `run_once` or `teardown` scenario takes no
+  `load`.
+- **Test-level model.** When every load scenario has its own `load`, the
+  test-level `virtual_users`, `duration`, `ramp_up`, `stages` and `load`
+  are left out, and `Parse` refuses each one that is present: "applies to
+  no scenario: every load scenario has its own load". Otherwise the
+  test-level model is required, as before, and runs the scenarios without
+  a `load`. A key holding its zero value (`0`, `""`, `[]`) reads as
+  absent. `Definition.UsesTestLoad` reports whether any load scenario
+  uses the test-level model.
+- **VoltTest Cloud.** On VoltTest Cloud the backend refuses, before the
+  run starts, a pool whose peak in a region is below that region's node
+  count, the peak being `virtual_users` for `"constant"`, the highest
+  stage `target` for `"stages"`, and `max_vus` (or `preallocated_vus` when
+  `max_vus` is absent) for `"rate"` and `"ramping_rate"`. `CloudProblems` does not
+  refuse a scenario's `load` or `start_at`; whether VoltTest Cloud runs
+  them is the backend's decision.
+
+A scenario's `load` and `start_at` and the `"constant"` and `"stages"`
+types joined schema_version "2.0" while it is a preview.
+
+## Cookies and variables
+
+`cookies` presets cookies by name, on the test, a scenario or a step.
+`vars` presets variables, on the test or a scenario, readable as
+`${name}`.
+
+```json
+"cookies": {"locale": "en-GB", "consent": "all"},
+"vars": {"currency": "EUR"},
+"scenarios": [{
+  "name": "Shopper",
+  "cookies": {"locale": "de-DE"},
+  "vars": {"currency": "CHF"},
+  "steps": [
+    {"name": "Home", "cookies": {"session": "${session_id}"},
+     "request": {"method": "GET", "url": "https://shop.example.com/?c=${currency}"}},
+    {"name": "Fresh session", "clear_cookies": true,
+     "request": {"method": "GET", "url": "https://shop.example.com/login"}}
+  ]
+}]
+```
+
+- **Preset cookies.** A scenario's cookie replaces the test's of the
+  same name, and a step's replaces both. How preset cookies interact with
+  the cookie jar, a step's `Cookie` header and `clear_cookies`, and which
+  hosts receive them, is defined by the engine's HTTP options
+  documentation.
+- **Cookie names** are HTTP tokens (letters, digits and
+  ``!#$%&'*+-.^_`|~``; no spaces, `=`, `;` or other separators), sent as
+  written, so a name cannot be a `${...}` reference.
+- **Cookie values** are RFC 6265 cookie-octets in their literal text: no
+  space, `"`, `,`, `;`, `\`, control character or non-ASCII. Text inside a
+  `${...}` reference (from `${` to the first `}`) is exempt; the engine
+  checks the resolved value when it sends the request. CR, LF
+  and NUL are refused anywhere. An empty value is allowed.
+- **`clear_cookies: true`** on a step drops the cookies the virtual user
+  kept from earlier responses before that step's request. `Parse` refuses
+  it in a scenario with `auto_handle_cookies: false`, where it has no
+  effect.
+- **`auto_handle_cookies`** is on by default for schema_version 2.x;
+  `auto_handle_cookies: false` opts out. v1 keeps it off unless set. An
+  explicit `false` survives when a parsed definition is marshalled again,
+  in v1 and v2; v1 readers decode the same value either way.
+- **Variables** have the lowest precedence: a CSV column, an extracted
+  value (setup globals included) or a built-in variable of the same name
+  wins over a var. So a var named like an extractor's `variable_name` is
+  a default until the value is extracted. A scenario's var replaces the
+  test's of the same name. A name is ASCII letters, digits, `_` and `-`
+  (no `.`, so no name looks like `${env.NAME}`); `env` and `fake` are
+  reserved for the `${env.NAME}` and `${fake.NAME}` built-ins. A value may
+  contain `${...}` references; when they resolve is defined by the
+  engine.
+- `{}` reads as absent at every level.
+
+`cookies`, `clear_cookies` and `vars` joined schema_version "2.0" while
+it is a preview.
+
+## JSON data files
+
+A scenario's `data_config` takes `data_format: "json"` as well as
+`"csv"`: an array of objects, one per row, whose keys name the
+variables. The modes (`sequential`, `random`, `unique`) and the
+`data_source`, `data_content` and dispatch-only `data_download_url` keys
+are the same. `has_header` applies to CSV only; `Parse` refuses it with
+`"json"`. `Parse` does not read the file's content. `"json"` joined
+schema_version "2.0" while it is a preview; v1 never checks
+`data_format`.
 
 ## Setup and teardown
 
@@ -855,12 +1021,14 @@ run its load scenario once.)
   read-only, and readable as `${name}` by every load virtual user and by
   the teardown scenarios. A later setup scenario sees the globals of the
   earlier ones.
-- **Precedence.** A CSV column, then a global, then a built-in variable.
-  A CSV column named like a global shadows it, in the virtual user that
-  reads that row only. A setup extractor named like a built-in (such as
-  `vu_id`, `iteration` or `scenario`) overrides that built-in in every
-  load virtual user, since variables win over built-ins; this is allowed
-  but best avoided.
+- **Precedence.** A CSV column, then an extracted value (a global or one
+  the virtual user extracted itself), then a built-in variable, then
+  [`vars`](#cookies-and-variables) (a scenario's before the test's), which
+  lose to all of these. A CSV column named like a global shadows it, in
+  the virtual user that reads that row only. A setup extractor named like
+  a built-in (such as `vu_id`, `iteration` or `scenario`) overrides that
+  built-in in every load virtual user, since extracted variables win over
+  built-ins; this is allowed but best avoided.
 - **Setup failure.** When a setup step fails (a `fail` or `abort` check
   that fails, a required extractor that misses, a transport error or an
   unexpected status), the run fails before the load starts, and neither
@@ -1134,18 +1302,22 @@ It reports, in this order:
 3. **`${env.NAME}` references.** A cloud node's environment holds its own
    settings, not yours. Each distinct reference is reported as written,
    filters included, at each path where it appears: `target.base_url`,
-   then for each step the request `url`, `body`, every string value in
+   each test-level `cookies` value and then each `vars` value (each by
+   sorted name), then for each scenario its `cookies` and `vars` values,
+   and for each of its steps the request `url`, `body`, every string value in
    `body_json`, every value in `fields`, each multipart file's
-   `filename` by field name, and every header value, by sorted
+   `filename` by field name, every header value, by sorted
    name (`headers.X-A` for one value, `headers.X-A[1]` for the second of
-   several).
+   several), and the step's `cookies` values.
    A reference runs from `${` to the first `}`; an unterminated `${env.X`
-   is literal. Keys in `body_json` and names in `fields` are sent as
-   written, so a reference in one is not refused.
+   is literal. Keys in `body_json`, names in `fields` and cookie and
+   variable names are not refused.
 4. **Setup and teardown.** Each `run_once` and each `teardown` scenario,
    at that flag.
 
-No current refusal depends on `nodes`; it is kept for callers.
+No current refusal depends on `nodes`; it is kept for callers. A
+scenario's own `load` and `start_at` are not refused here (see [Scenario
+load](#scenario-load)).
 
 Paths name keys the way `Parse` does: `headers.Accept`, or
 `headers["X Y"]` for a key that is not letters, digits, `_` and `-`, cut

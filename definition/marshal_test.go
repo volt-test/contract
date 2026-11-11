@@ -10,8 +10,10 @@ import (
 	"testing"
 )
 
-// testdata/recorded pins the v0.3.0 json.Marshal bytes of the v1 and valid
-// v2 fixtures and the V1TypeProblems of a v1 non-string header value.
+// testdata/recorded pins json.Marshal bytes of the v1 and valid v2
+// fixtures, and the V1TypeProblems of a v1 non-string header value. The
+// recordings hold the v0.3.0 bytes (unchanged through v0.4.0), plus an
+// explicit "auto_handle_cookies":false where a fixture writes one.
 var updateRecorded = flag.Bool("update-recorded", false, "re-record testdata/recorded from the current code")
 
 const recordedDir = "../testdata/recorded"
@@ -56,13 +58,13 @@ func TestMarshalUnchanged(t *testing.T) {
 				t.Fatal(err)
 			}
 			got = append(got, '\n')
-			if *updateRecorded {
-				writeRecorded(t, golden, got)
-				return
-			}
 			want, err := os.ReadFile(golden)
 			if os.IsNotExist(err) && strings.HasPrefix(rel, "v2/") {
 				t.Skip("added after v0.3.0; TestV2RoundTrip covers it")
+			}
+			if *updateRecorded {
+				writeRecorded(t, golden, got)
+				return
 			}
 			if err != nil {
 				t.Fatalf("%v (every v1 fixture needs a recording)", err)

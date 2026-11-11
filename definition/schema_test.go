@@ -81,7 +81,7 @@ func generateSchema(t *testing.T) []byte {
 		"RegionWeight": "One VoltTest Cloud region and its percent of the virtual users.",
 		"Target":       "The system under test.",
 		"Scenario":     "A sequence of steps that a virtual user runs.",
-		"DataConfig":   "A CSV data source. Each virtual user takes rows according to mode.",
+		"DataConfig":   "A CSV or JSON data source. Each virtual user takes rows according to mode.",
 		"Step":         "One HTTP request in a scenario.",
 		"Request":      "An HTTP request. The URL, body, header values, the string values of body_json, the values of fields and file names may contain ${variable} references; keys, field names and file contents are sent as written.",
 		"FilePart":     "One file of a multipart request body: a path or base64 content, with an optional file name and media type.",
@@ -90,8 +90,8 @@ func generateSchema(t *testing.T) []byte {
 		"Threshold":    "A pass/fail rule: an expression such as \"p95 < 500ms\", or an object with the expression and abort settings.",
 		"HTTPOptions":  "HTTP client options for every request: redirects, the HTTP version, response bodies and connection timeouts.",
 		"TLSOptions":   "TLS options for HTTPS targets: verification, minimum version and client certificates.",
-		"Load":         "An arrival-rate load profile: iterations start at a set rate, picked up by idle virtual users.",
-		"RateStage":    "One stage of a ramping_rate load profile. The rate starts at 0 and moves linearly to each stage's target over that stage's duration.",
+		"Load":         "A load profile: an arrival rate (rate, ramping_rate), where iterations start at a set rate and are picked up by idle virtual users, or, on a scenario only, the scenario's own virtual users (constant, stages).",
+		"RateStage":    "One stage of a ramping_rate or stages load profile. The rate or the number of virtual users starts at 0 and moves linearly to each stage's target over that stage's duration.",
 	}
 	for name, def := range s.Definitions {
 		desc, ok := typeDescriptions[name]
@@ -114,8 +114,10 @@ func generateSchema(t *testing.T) []byte {
 	checkSchemaRules(t, s)
 	setupTeardownRules(t, s)
 	oncePerVURules(t, s)
+	ownLoadRules(t, s)
 	bodyRules(t, s)
 	responseRules(t, s)
+	cookieVarRules(t, s)
 
 	b, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
@@ -125,45 +127,139 @@ func generateSchema(t *testing.T) []byte {
 }
 
 // loadModels adds the load model rules: the top-level choice between
-// stages, virtual_users and load, the keys each load type requires or
-// forbids, and a ramping_rate stage with a target above 0. Zero values
+// stages, virtual_users and load, or none of them when every load
+// scenario has its own load (and then only then); the keys each load type
+// requires or forbids; only the arrival-rate types at the top level; and a
+// ramping_rate or stages load with a stage target above 0. Zero values
 // read as absent, so a forbidden key may still be written with its zero
 // value.
 func loadModels(s *jsonschema.Schema) {
 	zero, one := uint64(0), uint64(1)
-	noLoad := &jsonschema.Schema{Required: []string{"load"}}
-	staged := jsonschema.NewProperties()
-	staged.Set("stages", &jsonschema.Schema{MinItems: &one})
-	constant := jsonschema.NewProperties()
-	constant.Set("virtual_users", &jsonschema.Schema{Minimum: json.Number("1")})
-	loadOnly := jsonschema.NewProperties()
-	loadOnly.Set("virtual_users", &jsonschema.Schema{Maximum: json.Number("0")})
-	loadOnly.Set("duration", &jsonschema.Schema{MaxLength: &zero})
-	loadOnly.Set("ramp_up", &jsonschema.Schema{MaxLength: &zero})
-	loadOnly.Set("stages", &jsonschema.Schema{MaxItems: &zero})
-	s.AnyOf = []*jsonschema.Schema{
-		{Required: []string{"stages"}, Properties: staged, Not: noLoad},
-		{Required: []string{"virtual_users"}, Properties: constant, Not: noLoad},
-		{Required: []string{"load"}, Properties: loadOnly},
+	// obj returns a schema with the properties kv (name, schema, ...),
+	// requiring the names in required.
+	obj := func(required []string, kv ...any) *jsonschema.Schema {
+		p := jsonschema.NewProperties()
+		for i := 0; i < len(kv); i += 2 {
+			p.Set(kv[i].(string), kv[i+1].(*jsonschema.Schema))
+		}
+		return &jsonschema.Schema{Required: required, Properties: p}
 	}
+	none := func() *jsonschema.Schema { return &jsonschema.Schema{Maximum: json.Number("0")} }
+	empty := func() *jsonschema.Schema { return &jsonschema.Schema{MaxLength: &zero} }
+	noItems := func() *jsonschema.Schema { return &jsonschema.Schema{MaxItems: &zero} }
+	atLeastOne := func() *jsonschema.Schema { return &jsonschema.Schema{Minimum: json.Number("1")} }
+	nonEmpty := func() *jsonschema.Schema { return &jsonschema.Schema{MinLength: &one} }
 
-	rate := jsonschema.NewProperties()
-	rate.Set("type", &jsonschema.Schema{Const: string(definition.LoadRate)})
-	rate.Set("rate", &jsonschema.Schema{Minimum: json.Number("1")})
-	rate.Set("duration", &jsonschema.Schema{MinLength: &one})
-	rate.Set("stages", &jsonschema.Schema{MaxItems: &zero})
-	ramping := jsonschema.NewProperties()
-	ramping.Set("type", &jsonschema.Schema{Const: string(definition.LoadRampingRate)})
-	ramping.Set("rate", &jsonschema.Schema{Maximum: json.Number("0")})
-	ramping.Set("duration", &jsonschema.Schema{MaxLength: &zero})
-	running := jsonschema.NewProperties()
-	running.Set("target", &jsonschema.Schema{Minimum: json.Number("1")})
-	ramping.Set("stages", &jsonschema.Schema{MinItems: &one, Contains: &jsonschema.Schema{
-		Required: []string{"target"}, Properties: running,
-	}})
+	// A scenario that does not use the test-level model: one with its own
+	// load, or a run_once or teardown scenario.
+	flagged := func(k string) *jsonschema.Schema { return obj([]string{k}, k, &jsonschema.Schema{Const: true}) }
+	notTopLevel := func() *jsonschema.Schema {
+		return &jsonschema.Schema{AnyOf: []*jsonschema.Schema{
+			{Required: []string{"load"}}, flagged("run_once"), flagged("teardown"),
+		}}
+	}
+	usesTop := func() *jsonschema.Schema { return &jsonschema.Schema{Contains: &jsonschema.Schema{Not: notTopLevel()}} }
+	noLoad := func() *jsonschema.Schema { return &jsonschema.Schema{Required: []string{"load"}} }
+	staged := obj([]string{"stages"}, "stages", &jsonschema.Schema{MinItems: &one}, "scenarios", usesTop())
+	staged.Not = noLoad()
+	constant := obj([]string{"virtual_users"}, "virtual_users", atLeastOne(), "scenarios", usesTop())
+	constant.Not = noLoad()
+	ownOnly := obj(nil, "virtual_users", none(), "duration", empty(), "ramp_up", empty(), "stages", noItems(),
+		"scenarios", &jsonschema.Schema{Items: notTopLevel()})
+	ownOnly.Not = noLoad()
+	s.AnyOf = []*jsonschema.Schema{
+		staged,
+		constant,
+		obj([]string{"load"}, "virtual_users", none(), "duration", empty(), "ramp_up", empty(), "stages", noItems(),
+			"scenarios", usesTop()),
+		ownOnly,
+	}
+	top, _ := s.Properties.Get("load")
+	top.Properties = obj(nil, "type", &jsonschema.Schema{Enum: []any{string(definition.LoadRate), string(definition.LoadRampingRate)}}).Properties
+
+	running := func() *jsonschema.Schema {
+		return &jsonschema.Schema{MinItems: &one, Contains: obj([]string{"target"}, "target", atLeastOne())}
+	}
+	is := func(t definition.LoadType) *jsonschema.Schema { return &jsonschema.Schema{Const: string(t)} }
 	s.Definitions["Load"].AnyOf = []*jsonschema.Schema{
-		{Required: []string{"rate", "duration"}, Properties: rate},
-		{Required: []string{"stages"}, Properties: ramping},
+		obj([]string{"rate", "duration", "preallocated_vus"},
+			"type", is(definition.LoadRate), "rate", atLeastOne(), "duration", nonEmpty(), "stages", noItems(),
+			"virtual_users", none(), "preallocated_vus", atLeastOne()),
+		obj([]string{"stages", "preallocated_vus"},
+			"type", is(definition.LoadRampingRate), "rate", none(), "duration", empty(), "stages", running(),
+			"virtual_users", none(), "preallocated_vus", atLeastOne()),
+		obj([]string{"virtual_users", "duration"},
+			"type", is(definition.LoadConstant), "virtual_users", atLeastOne(), "duration", nonEmpty(),
+			"rate", none(), "time_unit", empty(), "stages", noItems(), "preallocated_vus", none(), "max_vus", none()),
+		obj([]string{"stages"},
+			"type", is(definition.LoadStages), "stages", running(), "rate", none(), "time_unit", empty(),
+			"duration", empty(), "virtual_users", none(), "preallocated_vus", none(), "max_vus", none()),
+	}
+}
+
+// ownLoadRules adds the rules for a scenario's own load: no weight, not on
+// a run_once or teardown scenario, and start_at only with a load. It
+// extends the dependentSchemas that setupTeardownRules sets.
+func ownLoadRules(t *testing.T, s *jsonschema.Schema) {
+	t.Helper()
+	scenario := s.Definitions["Scenario"]
+	for _, k := range []string{"load", "start_at"} {
+		if _, ok := scenario.Properties.Get(k); !ok {
+			t.Fatalf("schema has no property Scenario.%s", k)
+		}
+	}
+	p := jsonschema.NewProperties()
+	p.Set("weight", &jsonschema.Schema{Maximum: json.Number("0")})
+	p.Set("run_once", &jsonschema.Schema{Const: false})
+	p.Set("teardown", &jsonschema.Schema{Const: false})
+	scenario.DependentSchemas["load"] = &jsonschema.Schema{Properties: p}
+	// start_at "" reads as absent.
+	zero := uint64(0)
+	noStart := jsonschema.NewProperties()
+	noStart.Set("start_at", &jsonschema.Schema{MaxLength: &zero})
+	scenario.DependentSchemas["start_at"] = &jsonschema.Schema{AnyOf: []*jsonschema.Schema{
+		{Properties: noStart}, {Required: []string{"load"}},
+	}}
+}
+
+// cookieVarRules adds the name and value rules of cookies and vars at
+// every level, clear_cookies only where auto_handle_cookies is not false,
+// and has_header only with data_format "csv". A cookie value is
+// cookie-octets outside ${...} references (from ${ to the first }), with
+// no CR, LF or NUL anywhere, which is what Parse checks.
+func cookieVarRules(t *testing.T, s *jsonschema.Schema) {
+	t.Helper()
+	prop := func(def *jsonschema.Schema, name string) *jsonschema.Schema {
+		p, ok := def.Properties.Get(name)
+		if !ok {
+			t.Fatalf("schema has no property %s", name)
+		}
+		return p
+	}
+	for _, def := range []*jsonschema.Schema{s, s.Definitions["Scenario"], s.Definitions["Step"]} {
+		c := prop(def, "cookies")
+		c.PropertyNames = &jsonschema.Schema{Pattern: "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$"}
+		c.AdditionalProperties.Pattern = `^(?:[\x21\x23-\x2B\x2D-\x3A\x3C-\x5B\x5D-\x7E]|\$\{[^}\r\n\x00]*\})*$`
+	}
+	for _, def := range []*jsonschema.Schema{s, s.Definitions["Scenario"]} {
+		prop(def, "vars").PropertyNames = &jsonschema.Schema{Pattern: "^[A-Za-z0-9_-]+$",
+			Not: &jsonschema.Schema{Enum: []any{"env", "fake"}}}
+	}
+	auto := jsonschema.NewProperties()
+	auto.Set("auto_handle_cookies", &jsonschema.Schema{Const: true})
+	noClear := jsonschema.NewProperties()
+	noClear.Set("clear_cookies", &jsonschema.Schema{Const: false})
+	steps := jsonschema.NewProperties()
+	steps.Set("steps", &jsonschema.Schema{Items: &jsonschema.Schema{Properties: noClear}})
+	s.Definitions["Scenario"].DependentSchemas["auto_handle_cookies"] = &jsonschema.Schema{AnyOf: []*jsonschema.Schema{
+		{Properties: auto}, {Properties: steps},
+	}}
+	noHeader := jsonschema.NewProperties()
+	noHeader.Set("has_header", &jsonschema.Schema{Const: false})
+	csv := jsonschema.NewProperties()
+	csv.Set("data_format", &jsonschema.Schema{Const: "csv"})
+	s.Definitions["DataConfig"].DependentSchemas = map[string]*jsonschema.Schema{
+		"has_header": {AnyOf: []*jsonschema.Schema{{Properties: noHeader}, {Properties: csv}}},
 	}
 }
 
@@ -589,6 +685,9 @@ var knownSchemaLooser = map[string]string{
 	"structure_http_connect_timeout_zero.json":           "durations are plain strings in the schema",
 	"structure_http_tls_handshake_timeout_negative.json": "durations are plain strings in the schema",
 	"structure_http_response_header_timeout_bad.json":    "durations are plain strings in the schema",
+
+	"structure_start_at_zero.json": "durations are plain strings in the schema",
+	"structure_start_at_bad.json":  "durations are plain strings in the schema",
 }
 
 // TestSchemaAgreesWithParse checks that the schema and Parse agree on
@@ -907,25 +1006,51 @@ func loadShape(t *testing.T, s, defs map[string]any) {
 		sort.Strings(out)
 		return out
 	}
-	if got := obj(obj(s["properties"])["load"])["$ref"]; got != "#/$defs/Load" {
+	topLoad := obj(obj(s["properties"])["load"])
+	if got := topLoad["$ref"]; got != "#/$defs/Load" {
 		t.Errorf("load $ref = %v", got)
 	}
+	// The test level takes the arrival-rate types only.
+	wantTop := map[string]any{"type": map[string]any{"enum": []any{"rate", "ramping_rate"}}}
+	if got := topLoad["properties"]; !reflect.DeepEqual(got, wantTop) {
+		t.Errorf("top-level load properties = %v, want %v", got, wantTop)
+	}
+	if got := obj(obj(obj(defs["Scenario"])["properties"])["load"])["$ref"]; got != "#/$defs/Load" {
+		t.Errorf("scenario load $ref = %v", got)
+	}
 	load := obj(defs["Load"])
-	want := []string{"duration", "max_vus", "preallocated_vus", "rate", "stages", "time_unit", "type"}
+	want := []string{"duration", "max_vus", "preallocated_vus", "rate", "stages", "time_unit", "type", "virtual_users"}
 	if got := keys(obj(load["properties"])); !reflect.DeepEqual(got, want) {
 		t.Errorf("load keys = %q, want %q", got, want)
 	}
-	if !reflect.DeepEqual(load["required"], []any{"type", "preallocated_vus"}) {
+	// preallocated_vus is required by the arrival-rate branches only.
+	if !reflect.DeepEqual(load["required"], []any{"type"}) {
 		t.Errorf("load required = %v", load["required"])
 	}
 	if got := keys(obj(obj(defs["RateStage"])["properties"])); !reflect.DeepEqual(got, []string{"duration", "target"}) {
 		t.Errorf("rate stage keys = %q", got)
 	}
-	if branches, _ := load["anyOf"].([]any); len(branches) != 2 {
-		t.Errorf("load anyOf = %v, want one branch per type", load["anyOf"])
+	branches, _ := load["anyOf"].([]any)
+	var types []string
+	for _, b := range branches {
+		types = append(types, obj(obj(obj(b)["properties"])["type"])["const"].(string))
 	}
-	if branches, _ := s["anyOf"].([]any); len(branches) != 3 {
-		t.Errorf("top-level anyOf = %v, want stages, virtual_users and load", s["anyOf"])
+	if want := []string{"rate", "ramping_rate", "constant", "stages"}; !reflect.DeepEqual(types, want) {
+		t.Errorf("load anyOf types = %q, want one branch per type %q", types, want)
+	}
+	if branches, _ := s["anyOf"].([]any); len(branches) != 4 {
+		t.Errorf("top-level anyOf = %v, want stages, virtual_users, load and every load scenario with its own load", s["anyOf"])
+	}
+	deps := obj(obj(defs["Scenario"])["dependentSchemas"])
+	wantStart := map[string]any{"anyOf": []any{
+		map[string]any{"properties": map[string]any{"start_at": map[string]any{"maxLength": 0.0}}},
+		map[string]any{"required": []any{"load"}},
+	}}
+	if got := deps["start_at"]; !reflect.DeepEqual(got, wantStart) {
+		t.Errorf("scenario dependentSchemas.start_at = %v, want %v", got, wantStart)
+	}
+	if _, ok := deps["load"]; !ok {
+		t.Error("scenario has no dependentSchemas.load")
 	}
 }
 

@@ -1,0 +1,108 @@
+[
+  {
+    "name": "absent",
+    "marshal": "{\"name\":\"cookies\",\"virtual_users\":1,\"duration\":\"5s\",\"scenarios\":[{\"name\":\"s\",\"steps\":[{\"name\":\"a\",\"request\":{\"method\":\"GET\",\"url\":\"https://shop.example.com/\"}}]},{\"name\":\"t\",\"steps\":[{\"name\":\"b\",\"request\":{\"method\":\"GET\",\"url\":\"https://shop.example.com/b\"}}]}]}"
+  },
+  {
+    "name": "true",
+    "marshal": "{\"name\":\"cookies\",\"virtual_users\":1,\"duration\":\"5s\",\"scenarios\":[{\"name\":\"s\",\"auto_handle_cookies\":true,\"steps\":[{\"name\":\"a\",\"request\":{\"method\":\"GET\",\"url\":\"https://shop.example.com/\"}}]},{\"name\":\"t\",\"steps\":[{\"name\":\"b\",\"request\":{\"method\":\"GET\",\"url\":\"https://shop.example.com/b\"}}]}]}"
+  },
+  {
+    "name": "false",
+    "marshal": "{\"name\":\"cookies\",\"virtual_users\":1,\"duration\":\"5s\",\"scenarios\":[{\"name\":\"s\",\"steps\":[{\"name\":\"a\",\"request\":{\"method\":\"GET\",\"url\":\"https://shop.example.com/\"}}]},{\"name\":\"t\",\"steps\":[{\"name\":\"b\",\"request\":{\"method\":\"GET\",\"url\":\"https://shop.example.com/b\"}}]}]}"
+  },
+  {
+    "name": "null",
+    "marshal": "{\"name\":\"cookies\",\"virtual_users\":1,\"duration\":\"5s\",\"scenarios\":[{\"name\":\"s\",\"steps\":[{\"name\":\"a\",\"request\":{\"method\":\"GET\",\"url\":\"https://shop.example.com/\"}}]},{\"name\":\"t\",\"steps\":[{\"name\":\"b\",\"request\":{\"method\":\"GET\",\"url\":\"https://shop.example.com/b\"}}]}]}"
+  },
+  {
+    "name": "string",
+    "problems": [
+      {
+        "Path": "scenarios[0].auto_handle_cookies",
+        "Message": "must be true or false",
+        "Count": 0
+      }
+    ]
+  },
+  {
+    "name": "string false",
+    "problems": [
+      {
+        "Path": "scenarios[0].auto_handle_cookies",
+        "Message": "must be true or false",
+        "Count": 0
+      }
+    ]
+  },
+  {
+    "name": "number",
+    "problems": [
+      {
+        "Path": "scenarios[0].auto_handle_cookies",
+        "Message": "must be true or false",
+        "Count": 0
+      }
+    ]
+  },
+  {
+    "name": "zero",
+    "problems": [
+      {
+        "Path": "scenarios[0].auto_handle_cookies",
+        "Message": "must be true or false",
+        "Count": 0
+      }
+    ]
+  },
+  {
+    "name": "object",
+    "problems": [
+      {
+        "Path": "scenarios[0].auto_handle_cookies",
+        "Message": "must be true or false",
+        "Count": 0
+      }
+    ]
+  },
+  {
+    "name": "array",
+    "problems": [
+      {
+        "Path": "scenarios[0].auto_handle_cookies",
+        "Message": "must be true or false",
+        "Count": 0
+      }
+    ]
+  },
+  {
+    "name": "case variant",
+    "marshal": "{\"name\":\"cookies\",\"virtual_users\":1,\"duration\":\"5s\",\"scenarios\":[{\"name\":\"s\",\"auto_handle_cookies\":true,\"steps\":[{\"name\":\"a\",\"request\":{\"method\":\"GET\",\"url\":\"https://shop.example.com/\"}}]},{\"name\":\"t\",\"steps\":[{\"name\":\"b\",\"request\":{\"method\":\"GET\",\"url\":\"https://shop.example.com/b\"}}]}]}"
+  },
+  {
+    "name": "upper case false",
+    "marshal": "{\"name\":\"cookies\",\"virtual_users\":1,\"duration\":\"5s\",\"scenarios\":[{\"name\":\"s\",\"steps\":[{\"name\":\"a\",\"request\":{\"method\":\"GET\",\"url\":\"https://shop.example.com/\"}}]},{\"name\":\"t\",\"steps\":[{\"name\":\"b\",\"request\":{\"method\":\"GET\",\"url\":\"https://shop.example.com/b\"}}]}]}"
+  },
+  {
+    "name": "true then null",
+    "marshal": "{\"name\":\"cookies\",\"virtual_users\":1,\"duration\":\"5s\",\"scenarios\":[{\"name\":\"s\",\"auto_handle_cookies\":true,\"steps\":[{\"name\":\"a\",\"request\":{\"method\":\"GET\",\"url\":\"https://shop.example.com/\"}}]},{\"name\":\"t\",\"steps\":[{\"name\":\"b\",\"request\":{\"method\":\"GET\",\"url\":\"https://shop.example.com/b\"}}]}]}"
+  },
+  {
+    "name": "false then true",
+    "marshal": "{\"name\":\"cookies\",\"virtual_users\":1,\"duration\":\"5s\",\"scenarios\":[{\"name\":\"s\",\"auto_handle_cookies\":true,\"steps\":[{\"name\":\"a\",\"request\":{\"method\":\"GET\",\"url\":\"https://shop.example.com/\"}}]},{\"name\":\"t\",\"steps\":[{\"name\":\"b\",\"request\":{\"method\":\"GET\",\"url\":\"https://shop.example.com/b\"}}]}]}"
+  },
+  {
+    "name": "true then case variant false",
+    "marshal": "{\"name\":\"cookies\",\"virtual_users\":1,\"duration\":\"5s\",\"scenarios\":[{\"name\":\"s\",\"steps\":[{\"name\":\"a\",\"request\":{\"method\":\"GET\",\"url\":\"https://shop.example.com/\"}}]},{\"name\":\"t\",\"steps\":[{\"name\":\"b\",\"request\":{\"method\":\"GET\",\"url\":\"https://shop.example.com/b\"}}]}]}"
+  },
+  {
+    "name": "true then string",
+    "problems": [
+      {
+        "Path": "scenarios[0].auto_handle_cookies",
+        "Message": "must be true or false",
+        "Count": 0
+      }
+    ]
+  }
+]

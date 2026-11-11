@@ -107,6 +107,14 @@ var v1ReadSet = map[string]string{
 	"scenarios[].steps[].request.timeout":     "v2",
 	"scenarios[].steps[].discard_body":        "v2",
 	"scenarios[].steps[].response_type":       "v2",
+	"cookies":                                 "v2",
+	"vars":                                    "v2",
+	"scenarios[].load":                        "v2",
+	"scenarios[].start_at":                    "v2",
+	"scenarios[].cookies":                     "v2",
+	"scenarios[].vars":                        "v2",
+	"scenarios[].steps[].cookies":             "v2",
+	"scenarios[].steps[].clear_cookies":       "v2",
 }
 
 type classified struct {
@@ -487,7 +495,7 @@ func toMirror(d *Definition) mirrorDefinition {
 	}
 	for i, sc := range d.Scenarios {
 		ms := mirrorScenario{Name: sc.Name, Description: sc.Description, Weight: sc.Weight,
-			ThinkTime: sc.ThinkTime, AutoHandleCookies: sc.AutoHandleCookies}
+			ThinkTime: sc.ThinkTime, AutoHandleCookies: sc.AutoHandleCookies != nil && *sc.AutoHandleCookies}
 		if sc.Steps != nil {
 			ms.Steps = make([]mirrorStep, len(sc.Steps))
 		}
@@ -1058,5 +1066,123 @@ func TestV1DropsHTTPTier2Keys(t *testing.T) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s: v1 with HTTP tier-2 keys:\n got %+v\nwant %+v", name, got, want)
 		}
+	}
+}
+
+// TestV1DropsScenarioLoadCookieKeys checks that
+// scenario_load_cookies_ignored.json, a v1 definition carrying a scenario's
+// load and start_at, cookies at every level, a step's clear_cookies and
+// vars at both levels, with values v2 rejects, parses exactly as it does
+// without them, and so do mistyped values and other spellings of the keys.
+// Its data_format "json" is a v1 field and is kept as written.
+func TestV1DropsScenarioLoadCookieKeys(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "testdata", "v1", "cli", "scenario_load_cookies_ignored.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stripped := withoutV2OnlyKeys(t, raw)
+	for _, k := range []string{`"load"`, `"start_at"`, `"cookies"`, `"clear_cookies"`, `"vars"`} {
+		if !bytes.Contains(raw, []byte(k)) || bytes.Contains(stripped, []byte(k)) {
+			t.Fatalf("the fixture's %s keys were not removed: %s", k, stripped)
+		}
+	}
+	want, err := Parse(stripped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc := want.Scenarios[0]
+	if want.VirtualUsers != 3 || len(want.Scenarios) != 2 || sc.Weight != 2 || sc.AutoHandleCookies == nil || !*sc.AutoHandleCookies ||
+		sc.DataConfig.DataFormat != "json" || !sc.DataConfig.HasHeader || want.Scenarios[1].Weight != 1 {
+		t.Fatalf("definition = %+v; the keys next to the dropped ones must still be read", want)
+	}
+	docs := map[string][]byte{"fixture": raw}
+	for name, keys := range map[string]string{
+		"strings":       `"load":"x","start_at":5,"cookies":"a=1","vars":["a"],`,
+		"null":          `"load":null,"start_at":null,"cookies":null,"vars":null,`,
+		"mistyped keys": `"load":{"type":1,"virtual_users":"5","stages":{}},"cookies":{"a":1},"vars":{"b":{}},`,
+		"case variants": `"Load":{"type":"constant"},"START_AT":"1s","Cookies":{"a":"b"},"VARS":{"c":"d"},`,
+	} {
+		docs["scenario "+name] = bytes.Replace(stripped, []byte(`"name":"Pool"`), []byte(keys+`"name":"Pool"`), 1)
+	}
+	for name, keys := range map[string]string{
+		"strings":       `"cookies":"a=1","clear_cookies":"yes",`,
+		"objects":       `"cookies":{"a":[]},"clear_cookies":{},`,
+		"case variants": `"COOKIES":{"a":"b"},"Clear_Cookies":true,`,
+	} {
+		docs["step "+name] = bytes.Replace(stripped, []byte(`"name":"Home"`), []byte(keys+`"name":"Home"`), 1)
+	}
+	for name, keys := range map[string]string{
+		"strings":       `"cookies":5,"vars":true,`,
+		"case variants": `"Cookies":{"a":"b"},"Vars":{"c":"d"},`,
+	} {
+		docs["test "+name] = bytes.Replace(stripped, []byte(`"name":"v1`), []byte(keys+`"name":"v1`), 1)
+	}
+	for name, doc := range docs {
+		if bytes.Equal(doc, stripped) {
+			t.Fatalf("%s: nothing was added: %s", name, doc)
+		}
+		got, err := Parse(doc)
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", name, err, doc)
+		}
+		if !got.IsV1() || len(got.V1TypeProblems) != 0 {
+			t.Errorf("%s: IsV1 %v, V1TypeProblems %v", name, got.IsV1(), got.V1TypeProblems)
+		}
+		if got.Cookies != nil || got.Vars != nil {
+			t.Errorf("%s: test-level cookies or vars kept", name)
+		}
+		for _, sc := range got.Scenarios {
+			if sc.Load != nil || sc.StartAt != "" || sc.Cookies != nil || sc.Vars != nil {
+				t.Errorf("%s: scenario %s kept a v2-only key", name, sc.Name)
+			}
+			for _, st := range sc.Steps {
+				if st.Cookies != nil || st.ClearCookies {
+					t.Errorf("%s: step %s kept cookies or clear_cookies", name, st.Name)
+				}
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: v1 with scenario load and cookie keys:\n got %+v\nwant %+v", name, got, want)
+		}
+	}
+}
+
+// TestV1RecordedFalseReadsTheSame checks that the explicit
+// "auto_handle_cookies":false the v1 recordings gained is the only change
+// from the v0.4.0 bytes and that a v1 reader decodes the same definition
+// from both.
+func TestV1RecordedFalseReadsTheSame(t *testing.T) {
+	const explicitFalse = `"auto_handle_cookies":false,`
+	withFalse := 0
+	err := filepath.Walk(filepath.Join("..", "testdata", "recorded", "marshal", "v1"), func(p string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		now, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		if !bytes.Contains(now, []byte(explicitFalse)) {
+			return nil
+		}
+		withFalse++
+		before := bytes.ReplaceAll(now, []byte(explicitFalse), nil)
+		var a, b mirrorDefinition
+		if err := json.Unmarshal(now, &a); err != nil {
+			return err
+		}
+		if err := json.Unmarshal(before, &b); err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(a, b) {
+			t.Errorf("%s: a v1 reader decodes the recording differently without the explicit false", p)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withFalse != 7 {
+		t.Errorf("%d v1 recordings carry an explicit false, want the 7 v1 fixtures that write one", withFalse)
 	}
 }
