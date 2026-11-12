@@ -21,7 +21,7 @@
       "steps": [
         {
           "name": "Home",
-          "cookies": {"session": "${session_id}", "theme": "v2-${theme}", "pref": "${pref | default:\"dark mode, v2\"}"},
+          "cookies": {"session": "${session_id}", "theme": "v2-${theme}", "pref": "${pref|default:\"dark mode, v2\"}"},
           "request": {"method": "GET", "url": "https://shop.example.com/?c=${currency}&v=${api-version}"}
         },
         {
