@@ -254,6 +254,42 @@ func TestV2Problems(t *testing.T) {
 			m["stages"] = []any{map[string]any{"duration": "10s", "target": 5}}
 		}, nil},
 		{"empty stages with constant load", func(m map[string]any) { m["stages"] = []any{} }, nil},
+		{"staged load with lifecycle keys", func(m map[string]any) {
+			delete(m, "virtual_users")
+			delete(m, "duration")
+			m["stages"] = []any{map[string]any{"duration": "10s", "target": 5}}
+			m["initial_virtual_users"] = 0
+			m["stop_grace"] = "0s"
+			m["ramp_down_grace"] = "1m"
+		}, nil},
+		{"constant load with stop_grace", func(m map[string]any) { m["stop_grace"] = "45s" }, nil},
+		{"run once with stop_grace", func(m map[string]any) { delete(m, "duration"); m["stop_grace"] = "45s" }, nil},
+		{"lifecycle keys with stages", func(m map[string]any) {
+			delete(m, "virtual_users")
+			delete(m, "duration")
+			m["stages"] = []any{map[string]any{"duration": "10s", "target": 5}}
+			m["initial_virtual_users"] = -2
+			m["stop_grace"] = "-1s"
+			m["ramp_down_grace"] = "later"
+		}, []string{
+			"initial_virtual_users: must not be negative",
+			"stop_grace: must not be negative",
+			`ramp_down_grace: must be a duration such as "30s" or "1m30s", got "later"`,
+		}},
+		{"lifecycle keys without stages", func(m map[string]any) {
+			m["initial_virtual_users"] = 0
+			m["ramp_down_grace"] = "10s"
+		}, []string{"initial_virtual_users: needs stages", "ramp_down_grace: needs stages"}},
+		{"lifecycle keys of the wrong type", func(m map[string]any) {
+			m["initial_virtual_users"] = "1"
+			m["stop_grace"] = 30
+			m["ramp_down_grace"] = nil
+		}, []string{"initial_virtual_users: must be an integer", "ramp_down_grace: must not be null", "stop_grace: must be a string"}},
+		{"null initial_virtual_users", func(m map[string]any) {
+			m["initial_virtual_users"] = nil
+			scenario0(m)["load"] = map[string]any{"type": "stages", "stages": []any{map[string]any{"duration": "1m", "target": 1}},
+				"initial_virtual_users": nil}
+		}, []string{"initial_virtual_users: must not be null", "scenarios[0].load.initial_virtual_users: must not be null"}},
 		{"empty stages alone", func(m map[string]any) {
 			delete(m, "virtual_users")
 			delete(m, "duration")
@@ -374,6 +410,13 @@ func TestV2Problems(t *testing.T) {
 			step0(m)["thresholds"] = []any{"ttfb < 100ms", "bytes_sent<=1kib", "rps>1", "check_rate == 100%"}
 		}, nil},
 
+		{"interrupted_iterations at the test and a scenario, not a step", func(m map[string]any) {
+			m["thresholds"] = []any{"interrupted_iterations == 0"}
+			scenario0(m)["thresholds"] = []any{map[string]any{"expr": "interrupted_iterations < 5", "abort_on_fail": true}}
+			step0(m)["thresholds"] = []any{"interrupted_iterations == 0"}
+		}, []string{
+			"scenarios[0].steps[0].thresholds[0]: interrupted_iterations is not available on a step; use it on the test or a scenario",
+		}},
 		{"data_download_url alone is a source", func(m map[string]any) {
 			scenario0(m)["data_config"] = map[string]any{"data_format": "csv", "mode": "random", "data_download_url": "https://storage.example.com/x.csv"}
 		}, nil},
@@ -561,17 +604,21 @@ func TestV2RoundTrip(t *testing.T) {
 	// An explicit follow_redirects: false stays apart from absent.
 	v := definition.V2_0
 	no, yes := false, true
+	zero := 0
 	want := &definition.Definition{
-		SchemaVersion: &v,
-		Name:          "built",
-		Description:   "d",
-		Stages:        []definition.Stage{{Duration: "10s", Target: 5}, {Duration: "5s"}},
-		HTTPTimeout:   "5s",
-		HTTPDebug:     true,
-		Target:        &definition.Target{URL: "https://a", IdleTimeout: "1m", BaseURL: "${base}"},
-		RegionConfig:  []definition.RegionWeight{{Region: "us", Weight: 2}},
-		Thresholds:    []definition.ThresholdConfig{{Expr: "p95 < 1s"}, {Expr: "error_rate < 1%", AbortOnFail: true, DelayAbort: "10s"}},
-		HTTP:          &definition.HTTPOptions{FollowRedirects: &no, MaxRedirects: 4, Version: "1.1"},
+		SchemaVersion:       &v,
+		Name:                "built",
+		Description:         "d",
+		Stages:              []definition.Stage{{Duration: "10s", Target: 5}, {Duration: "5s"}},
+		InitialVirtualUsers: &zero,
+		StopGrace:           "0s",
+		RampDownGrace:       "1s",
+		HTTPTimeout:         "5s",
+		HTTPDebug:           true,
+		Target:              &definition.Target{URL: "https://a", IdleTimeout: "1m", BaseURL: "${base}"},
+		RegionConfig:        []definition.RegionWeight{{Region: "us", Weight: 2}},
+		Thresholds:          []definition.ThresholdConfig{{Expr: "p95 < 1s"}, {Expr: "error_rate < 1%", AbortOnFail: true, DelayAbort: "10s"}},
+		HTTP:                &definition.HTTPOptions{FollowRedirects: &no, MaxRedirects: 4, Version: "1.1"},
 		TLS: &definition.TLSOptions{InsecureSkipVerify: true, MinVersion: "1.3", ClientCert: "certs/client.pem",
 			ClientKey: "certs/client-key.pem", CACert: "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n"},
 		Scenarios: []definition.Scenario{{

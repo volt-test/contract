@@ -50,9 +50,25 @@ type Definition struct {
 	Duration string `json:"duration,omitempty"`
 	// Constant load: time to start all virtual users, e.g. "30s".
 	RampUp string `json:"ramp_up,omitempty"`
-	// Staged load: each stage moves to its target number of virtual users
-	// over its duration. Use instead of virtual_users, duration and ramp_up.
+	// Staged load: the number of virtual users moves linearly from
+	// initial_virtual_users to each stage's target over that stage's
+	// duration. Use instead of virtual_users, duration and ramp_up.
 	Stages []Stage `json:"stages,omitempty"`
+	// Staged load: virtual users running when the load starts (after
+	// setup); the first stage moves linearly from this number to its target
+	// (default 1; 0 ramps from zero). Needs stages.
+	InitialVirtualUsers *int `json:"initial_virtual_users,omitempty" contract:"v2" jsonschema:"minimum=0"`
+	// How long each virtual user may finish its current iteration once the
+	// test-level load ends, e.g. "30s" (default "30s"; "0s" cuts at once).
+	// No new iteration starts; one still running is then cancelled and
+	// counted in interrupted_iterations. Applies to the scenarios without
+	// their own load.
+	StopGrace string `json:"stop_grace,omitempty" contract:"v2"`
+	// Staged load: how long a virtual user removed by a stage that lowers
+	// the target may finish its current iteration before it exits (default
+	// "30s"; "0s" cuts at once). One still running is then cancelled and
+	// counted in interrupted_iterations. Needs stages.
+	RampDownGrace string `json:"ramp_down_grace,omitempty" contract:"v2"`
 	// Arrival-rate load: iterations start at a set rate, whatever the
 	// response times. Use instead of virtual_users, duration, ramp_up and
 	// stages. Only types "rate" and "ramping_rate" apply here. Leave the
@@ -273,24 +289,40 @@ type Load struct {
 	TimeUnit string `json:"time_unit,omitempty"`
 	// Types rate and constant: how long the load runs, e.g. "5m".
 	Duration string `json:"duration,omitempty"`
-	// Types ramping_rate and stages: the rate, or the number of virtual
-	// users, starts at 0 and moves linearly to each stage's target over that
-	// stage's duration.
+	// Types ramping_rate and stages: the value moves linearly to each
+	// stage's target over that stage's duration. The rate starts at 0; the
+	// number of virtual users starts at initial_virtual_users.
 	Stages []RateStage `json:"stages,omitempty"`
 	// Type constant: the scenario's virtual users (at least 1).
 	VirtualUsers int `json:"virtual_users,omitempty" jsonschema:"minimum=0"`
 	// Types rate and ramping_rate: virtual users started before the load
 	// begins (at least 1).
-	PreallocatedVUs int `json:"preallocated_vus,omitempty" jsonschema:"minimum=0"`
+	PreallocatedVirtualUsers int `json:"preallocated_virtual_users,omitempty" jsonschema:"minimum=0"`
 	// Types rate and ramping_rate: most virtual users the load may run
-	// (default preallocated_vus). When all are busy, an iteration that is
-	// due is dropped and counted.
-	MaxVUs int `json:"max_vus,omitempty" jsonschema:"minimum=0"`
+	// (default preallocated_virtual_users). When all are busy, an iteration
+	// that is due is dropped and counted.
+	MaxVirtualUsers int `json:"max_virtual_users,omitempty" jsonschema:"minimum=0"`
+	// Type stages: virtual users running when the scenario's load starts
+	// (at start_at); the first stage moves linearly from this number to its
+	// target (default 1; 0 ramps from zero).
+	InitialVirtualUsers *int `json:"initial_virtual_users,omitempty" jsonschema:"minimum=0"`
+	// Any type, on a scenario's load: how long each virtual user may finish
+	// its current iteration when the load's duration or last stage ends,
+	// e.g. "30s" (default "30s"; "0s" cuts at once). No new iteration
+	// starts; one still running is then cancelled and counted in
+	// interrupted_iterations. The test-level stop_grace does not apply here.
+	StopGrace string `json:"stop_grace,omitempty"`
+	// Type stages: how long a virtual user removed by a stage that lowers
+	// the target may finish its current iteration before it exits (default
+	// "30s"; "0s" cuts at once). One still running is then cancelled and
+	// counted in interrupted_iterations.
+	RampDownGrace string `json:"ramp_down_grace,omitempty"`
 }
 
 // RateStage is one stage of a ramping_rate or stages load profile. The
-// value moves linearly from the previous stage's target (0 for the first)
-// to Target.
+// value moves linearly from the previous stage's target to Target; the
+// first stage starts from 0 (ramping_rate) or initial_virtual_users
+// (stages).
 type RateStage struct {
 	// How long the stage lasts, e.g. "1m".
 	Duration string `json:"duration" jsonschema:"required,minLength=1"`
@@ -355,8 +387,9 @@ type Scenario struct {
 	// run_once or teardown scenario. On VoltTest Cloud the backend refuses,
 	// before the run starts, a pool whose peak in a region is below that
 	// region's node count, the peak being virtual_users for constant, the
-	// highest stage target for stages, and max_vus (or preallocated_vus when
-	// max_vus is absent) for rate and ramping_rate.
+	// larger of initial_virtual_users and the highest stage target for
+	// stages, and max_virtual_users (or preallocated_virtual_users when
+	// max_virtual_users is absent) for rate and ramping_rate.
 	Load *Load `json:"load,omitempty" contract:"v2"`
 	// How long after the load starts the scenario's own load starts, e.g.
 	// "30s" (greater than zero, no upper bound; absent starts it with the

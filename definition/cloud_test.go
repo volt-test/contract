@@ -190,8 +190,8 @@ func TestCloudProblemsSetupTeardown(t *testing.T) {
 // No load model is refused on any node count.
 func TestCloudProblemsNodes(t *testing.T) {
 	const scenarios = `"scenarios": [{"name": "s", "steps": [{"name": "a", "request": {"method": "GET", "url": "https://x.test"}}]}]`
-	rate := []byte(`{"schema_version": "2.0", "name": "t", "load": {"type": "rate", "rate": 5, "duration": "1s", "preallocated_vus": 1}, ` + scenarios + `}`)
-	ramping := []byte(`{"schema_version": "2.0", "name": "t", "load": {"type": "ramping_rate", "stages": [{"duration": "1s", "target": 5}], "preallocated_vus": 1}, ` + scenarios + `}`)
+	rate := []byte(`{"schema_version": "2.0", "name": "t", "load": {"type": "rate", "rate": 5, "duration": "1s", "preallocated_virtual_users": 1}, ` + scenarios + `}`)
+	ramping := []byte(`{"schema_version": "2.0", "name": "t", "load": {"type": "ramping_rate", "stages": [{"duration": "1s", "target": 5}], "preallocated_virtual_users": 1}, ` + scenarios + `}`)
 	constant := []byte(`{"schema_version": "2.0", "name": "t", "virtual_users": 1, "duration": "1s", ` + scenarios + `}`)
 	staged := []byte(`{"schema_version": "2.0", "name": "t", "stages": [{"duration": "1s", "target": 2}], ` + scenarios + `}`)
 	for _, n := range []int{-1, 0, 1, 2, 3, 100} {
@@ -215,7 +215,7 @@ func TestCloudProblemsThresholds(t *testing.T) {
 // steps), then run_once and teardown.
 func TestCloudProblemsOrder(t *testing.T) {
 	data := []byte(`{"schema_version": "2.0", "name": "t",
-		"load": {"type": "rate", "rate": 5, "duration": "1s", "preallocated_vus": 1},
+		"load": {"type": "rate", "rate": 5, "duration": "1s", "preallocated_virtual_users": 1},
 		"tls": {"client_cert": "c.pem", "client_key": "k.pem"},
 		"target": {"base_url": "https://x.test/${env.BASE}"},
 		"scenarios": [
@@ -242,7 +242,7 @@ func TestCloudProblemsV1(t *testing.T) {
 	for _, version := range []string{``, `"schema_version": 1, `, `"schema_version": "1", `} {
 		data := []byte(`{` + version + `"name": "t", "virtual_users": 1, "duration": "1s",
 			"target": {"url": "https://x.test/${env.X}", "idle_timeout": "1s"},
-			"load": {"type": "rate", "rate": 5, "duration": "1s", "preallocated_vus": 1},
+			"load": {"type": "rate", "rate": 5, "duration": "1s", "preallocated_virtual_users": 1},
 			"scenarios": [{"name": "s", "run_once": true, "steps": [{"name": "a", "request": {"method": "POST",
 				"url": "https://x.test/${env.X}", "body": "${env.Y}", "header": {"A": "${env.Z}"}, "headers": {"B": "${env.Z}"}}}]}]}`)
 		d := mustParse(t, data)

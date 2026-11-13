@@ -95,7 +95,7 @@ func generateSchema(t *testing.T) []byte {
 		"HTTPOptions":  "HTTP client options for every request: redirects, the HTTP version, response bodies and connection timeouts.",
 		"TLSOptions":   "TLS options for HTTPS targets: verification, minimum version and client certificates.",
 		"Load":         "A load profile: an arrival rate (rate, ramping_rate), where iterations start at a set rate and are picked up by idle virtual users, or, on a scenario only, the scenario's own virtual users (constant, stages).",
-		"RateStage":    "One stage of a ramping_rate or stages load profile. The rate or the number of virtual users starts at 0 and moves linearly to each stage's target over that stage's duration.",
+		"RateStage":    "One stage of a ramping_rate or stages load profile. The value moves linearly to each stage's target over that stage's duration; the rate starts at 0 and the number of virtual users at initial_virtual_users.",
 	}
 	for name, def := range s.Definitions {
 		desc, ok := typeDescriptions[name]
@@ -132,11 +132,14 @@ func generateSchema(t *testing.T) []byte {
 
 // loadModels adds the load model rules: the top-level choice between
 // stages, virtual_users and load, or none of them when every load
-// scenario has its own load (and then only then); the keys each load type
-// requires or forbids; only the arrival-rate types at the top level; and a
-// ramping_rate or stages load with a stage target above 0. Zero values
-// read as absent, so a forbidden key may still be written with its zero
-// value.
+// scenario has its own load (and then only then); initial_virtual_users
+// and ramp_down_grace with stages only, and stop_grace with any model; the
+// keys each load type requires or forbids; only the arrival-rate types at
+// the top level, without their own stop_grace; a ramping_rate load with a
+// stage target above 0; and a stages load with a stage target or
+// initial_virtual_users above 0. Zero values read as absent, so a
+// forbidden key may still be written with its zero value, except
+// initial_virtual_users, where 0 is a value.
 func loadModels(s *jsonschema.Schema) {
 	zero, one := uint64(0), uint64(1)
 	// obj returns a schema with the properties kv (name, schema, ...),
@@ -166,38 +169,53 @@ func loadModels(s *jsonschema.Schema) {
 	noLoad := func() *jsonschema.Schema { return &jsonschema.Schema{Required: []string{"load"}} }
 	staged := obj([]string{"stages"}, "stages", &jsonschema.Schema{MinItems: &one}, "scenarios", usesTop())
 	staged.Not = noLoad()
-	constant := obj([]string{"virtual_users"}, "virtual_users", atLeastOne(), "scenarios", usesTop())
+	// initial_virtual_users and ramp_down_grace need stages.
+	noRamp := jsonschema.FalseSchema
+	constant := obj([]string{"virtual_users"}, "virtual_users", atLeastOne(), "scenarios", usesTop(),
+		"initial_virtual_users", noRamp, "ramp_down_grace", empty())
 	constant.Not = noLoad()
 	ownOnly := obj(nil, "virtual_users", none(), "duration", empty(), "ramp_up", empty(), "stages", noItems(),
+		"initial_virtual_users", noRamp, "ramp_down_grace", empty(), "stop_grace", empty(),
 		"scenarios", &jsonschema.Schema{Items: notTopLevel()})
 	ownOnly.Not = noLoad()
 	s.AnyOf = []*jsonschema.Schema{
 		staged,
 		constant,
 		obj([]string{"load"}, "virtual_users", none(), "duration", empty(), "ramp_up", empty(), "stages", noItems(),
-			"scenarios", usesTop()),
+			"initial_virtual_users", noRamp, "ramp_down_grace", empty(), "scenarios", usesTop()),
 		ownOnly,
 	}
 	top, _ := s.Properties.Get("load")
-	top.Properties = obj(nil, "type", &jsonschema.Schema{Enum: []any{string(definition.LoadRate), string(definition.LoadRampingRate)}}).Properties
+	top.Properties = obj(nil, "type", &jsonschema.Schema{Enum: []any{string(definition.LoadRate), string(definition.LoadRampingRate)}},
+		"stop_grace", empty()).Properties
 
 	running := func() *jsonschema.Schema {
 		return &jsonschema.Schema{MinItems: &one, Contains: obj([]string{"target"}, "target", atLeastOne())}
 	}
 	is := func(t definition.LoadType) *jsonschema.Schema { return &jsonschema.Schema{Const: string(t)} }
+	// A stages pool runs when a stage target or initial_virtual_users is
+	// above 0.
+	pool := obj([]string{"stages"},
+		"type", is(definition.LoadStages), "stages", &jsonschema.Schema{MinItems: &one}, "rate", none(), "time_unit", empty(),
+		"duration", empty(), "virtual_users", none(), "preallocated_virtual_users", none(), "max_virtual_users", none())
+	pool.AnyOf = []*jsonschema.Schema{
+		obj(nil, "stages", &jsonschema.Schema{Contains: obj([]string{"target"}, "target", atLeastOne())}),
+		obj([]string{"initial_virtual_users"}, "initial_virtual_users", atLeastOne()),
+	}
 	s.Definitions["Load"].AnyOf = []*jsonschema.Schema{
-		obj([]string{"rate", "duration", "preallocated_vus"},
+		obj([]string{"rate", "duration", "preallocated_virtual_users"},
 			"type", is(definition.LoadRate), "rate", atLeastOne(), "duration", nonEmpty(), "stages", noItems(),
-			"virtual_users", none(), "preallocated_vus", atLeastOne()),
-		obj([]string{"stages", "preallocated_vus"},
+			"virtual_users", none(), "preallocated_virtual_users", atLeastOne(),
+			"initial_virtual_users", noRamp, "ramp_down_grace", empty()),
+		obj([]string{"stages", "preallocated_virtual_users"},
 			"type", is(definition.LoadRampingRate), "rate", none(), "duration", empty(), "stages", running(),
-			"virtual_users", none(), "preallocated_vus", atLeastOne()),
+			"virtual_users", none(), "preallocated_virtual_users", atLeastOne(),
+			"initial_virtual_users", noRamp, "ramp_down_grace", empty()),
 		obj([]string{"virtual_users", "duration"},
 			"type", is(definition.LoadConstant), "virtual_users", atLeastOne(), "duration", nonEmpty(),
-			"rate", none(), "time_unit", empty(), "stages", noItems(), "preallocated_vus", none(), "max_vus", none()),
-		obj([]string{"stages"},
-			"type", is(definition.LoadStages), "stages", running(), "rate", none(), "time_unit", empty(),
-			"duration", empty(), "virtual_users", none(), "preallocated_vus", none(), "max_vus", none()),
+			"rate", none(), "time_unit", empty(), "stages", noItems(), "preallocated_virtual_users", none(), "max_virtual_users", none(),
+			"initial_virtual_users", noRamp, "ramp_down_grace", empty()),
+		pool,
 	}
 }
 
@@ -724,10 +742,11 @@ var knownSchemaLooser = map[string]string{
 	"structure_tls_blank_path.json":                  "optional keys take no pattern; a blank path is a Parse rule",
 	"structure_tls_path_with_newline.json":           "optional keys take no pattern; a line break in a path is a Parse rule",
 
-	"structure_load_time_unit_zero.json":              "durations are plain strings in the schema",
-	"structure_load_rate_duration_zero.json":          "durations are plain strings in the schema",
-	"structure_load_ramping_stage_zero_duration.json": "durations are plain strings in the schema",
-	"structure_load_max_vus_below_preallocated.json":  "max_vus >= preallocated_vus compares two keys",
+	"structure_load_time_unit_zero.json":                       "durations are plain strings in the schema",
+	"structure_load_rate_duration_zero.json":                   "durations are plain strings in the schema",
+	"structure_load_ramping_stage_zero_duration.json":          "durations are plain strings in the schema",
+	"structure_load_max_virtual_users_below_preallocated.json": "max_virtual_users >= preallocated_virtual_users compares two keys",
+	"structure_load_stop_grace_negative.json":                  "durations are plain strings in the schema",
 
 	"structure_run_once_global_extracted.json":   "a run_once global extracted by another scenario compares extractors across scenarios",
 	"structure_run_once_global_by_run_once.json": "a run_once global extracted by another scenario compares extractors across scenarios",
@@ -1153,8 +1172,9 @@ func loadShape(t *testing.T, s, defs map[string]any) {
 	if got := topLoad["$ref"]; got != "#/$defs/Load" {
 		t.Errorf("load $ref = %v", got)
 	}
-	// The test level takes the arrival-rate types only.
-	wantTop := map[string]any{"type": map[string]any{"enum": []any{"rate", "ramping_rate"}}}
+	// The test level takes the arrival-rate types only, and its stop_grace
+	// is the top-level key.
+	wantTop := map[string]any{"type": map[string]any{"enum": []any{"rate", "ramping_rate"}}, "stop_grace": map[string]any{"maxLength": 0.0}}
 	if got := topLoad["properties"]; !reflect.DeepEqual(got, wantTop) {
 		t.Errorf("top-level load properties = %v, want %v", got, wantTop)
 	}
@@ -1162,11 +1182,12 @@ func loadShape(t *testing.T, s, defs map[string]any) {
 		t.Errorf("scenario load $ref = %v", got)
 	}
 	load := obj(defs["Load"])
-	want := []string{"duration", "max_vus", "preallocated_vus", "rate", "stages", "time_unit", "type", "virtual_users"}
+	want := []string{"duration", "initial_virtual_users", "max_virtual_users", "preallocated_virtual_users", "ramp_down_grace", "rate",
+		"stages", "stop_grace", "time_unit", "type", "virtual_users"}
 	if got := keys(obj(load["properties"])); !reflect.DeepEqual(got, want) {
 		t.Errorf("load keys = %q, want %q", got, want)
 	}
-	// preallocated_vus is required by the arrival-rate branches only.
+	// preallocated_virtual_users is required by the arrival-rate branches only.
 	if !reflect.DeepEqual(load["required"], []any{"type"}) {
 		t.Errorf("load required = %v", load["required"])
 	}

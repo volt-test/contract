@@ -1,14 +1,9 @@
 {
   "schema_version": "2.0",
   "name": "Invalid load",
-  "load": {
-    "type": "rate",
-    "rate": 500,
-    "time_unit": "1s",
-    "duration": "5m",
-    "preallocated_vus": 200,
-    "max_vus": 100
-  },
+  "virtual_users": 5,
+  "duration": "1m",
+  "initial_virtual_users": 2,
   "scenarios": [
     {
       "name": "Home",

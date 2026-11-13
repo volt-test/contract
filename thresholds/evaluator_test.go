@@ -101,6 +101,33 @@ func TestDroppedIterationsZero(t *testing.T) {
 	}
 }
 
+// interrupted_iterations == 0 passes on 0, fails on 3, and has no data
+// when the producer did not measure it, at test and scenario scope. It
+// reads its own counter, not iterations or dropped_iterations.
+func TestInterruptedIterationsZero(t *testing.T) {
+	for _, tc := range []struct {
+		interrupted *int64
+		status      thresholds.Status
+	}{{ptr(0), thresholds.StatusPassed}, {ptr(3), thresholds.StatusFailed}, {nil, thresholds.StatusNoData}} {
+		sc := thresholds.Scope{Iterations: ptr(7), DroppedIterations: ptr(5), InterruptedIterations: tc.interrupted}
+		s := &thresholds.Snapshot{Start: t0, End: t0.Add(time.Second),
+			Test: sc, Scenarios: map[string]*thresholds.ScenarioScope{"s": {Scope: sc}}}
+		for _, ref := range []thresholds.Ref{{}, {Scenario: "s"}} {
+			r := evaluate(t, s, ref, "interrupted_iterations == 0")
+			if r.Status != tc.status || r.Passed != (tc.status == thresholds.StatusPassed) {
+				t.Errorf("interrupted %v at %s: %+v", tc.interrupted, ref.Scope(), r)
+			}
+			if tc.interrupted == nil {
+				if r.Actual != nil {
+					t.Errorf("no_data with actual %v", *r.Actual)
+				}
+			} else if *r.Actual != float64(*tc.interrupted) || r.Unit != "" {
+				t.Errorf("actual %v %q", *r.Actual, r.Unit)
+			}
+		}
+	}
+}
+
 // Missing data is no_data, never a 0ms pass, and fails the final verdict
 // without counting as a breach. A scope the snapshot does not have is
 // no_data for every metric.
@@ -301,7 +328,7 @@ func deref(p *float64) any {
 func TestEvaluateEveryMetric(t *testing.T) {
 	sc := thresholds.Scope{
 		Requests: 400, Failed: 10, BytesSent: 12_345, BytesReceived: 67_890,
-		Checks: ptr(200), ChecksPassed: ptr(150), Iterations: ptr(40), DroppedIterations: ptr(2),
+		Checks: ptr(200), ChecksPassed: ptr(150), Iterations: ptr(40), DroppedIterations: ptr(2), InterruptedIterations: ptr(6),
 		Duration:          dist(t, 1000, 2000, 3000, 4000, 5500),
 		TTFB:              dist(t, 100, 300),
 		IterationDuration: dist(t, 1_000_000, 2_000_000, 4_000_000),
@@ -316,7 +343,7 @@ func TestEvaluateEveryMetric(t *testing.T) {
 		"iteration_duration": {7000.0 / 3, "ms"}, "iteration_duration_min": {1000.0, "ms"},
 		"error_rate": {2.5, "%"}, "check_rate": {75.0, "%"},
 		"rps": {50.0, "req/s"}, "requests": {400.0, ""}, "failed": {10.0, ""},
-		"iterations": {40.0, ""}, "dropped_iterations": {2.0, ""},
+		"iterations": {40.0, ""}, "dropped_iterations": {2.0, ""}, "interrupted_iterations": {6.0, ""},
 		"bytes_sent": {12345.0, "bytes"}, "bytes_received": {67890.0, "bytes"},
 	}
 	for _, p := range []string{"p50", "p75", "p90", "p95", "p99", "p99.9"} {

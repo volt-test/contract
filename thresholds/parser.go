@@ -642,14 +642,16 @@ func unknownMetric(name string) string {
 	}
 	return fmt.Sprintf("unknown metric %s; the metrics are avg, min, max, p50, p75, p90, p95, p99, p99.9, "+
 		"ttfb and ttfb_<aggregate>, iteration_duration and iteration_duration_<aggregate>, "+
-		"error_rate, check_rate, rps, requests, failed, bytes_sent, bytes_received, iterations and dropped_iterations", q)
+		"error_rate, check_rate, rps, requests, failed, bytes_sent, bytes_received, iterations, dropped_iterations "+
+		"and interrupted_iterations", q)
 }
 
 // ValidFor reports whether the threshold may be attached at scope k. The
-// iteration metrics (iteration_duration and its variants, iterations and
-// dropped_iterations) describe whole scenario runs, so they are available
-// on the test and on scenarios but not on steps. It checks Valid first.
-// Errors are *ScopeError, or wrap ErrInvalidThreshold.
+// iteration metrics (iteration_duration and its variants, iterations,
+// dropped_iterations and interrupted_iterations) describe whole scenario
+// runs, so they are available on the test and on scenarios but not on
+// steps. It checks Valid first. Errors are *ScopeError, or wrap
+// ErrInvalidThreshold.
 func (t Threshold) ValidFor(k ScopeKind) error {
 	if err := t.Valid(); err != nil {
 		return err

@@ -22,8 +22,8 @@
         "type": "constant",
         "virtual_users": 5,
         "duration": "1m",
-        "preallocated_vus": 5,
-        "max_vus": 10,
+        "preallocated_virtual_users": 5,
+        "max_virtual_users": 10,
         "rate": 3
       },
       "steps": [

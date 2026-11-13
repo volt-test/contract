@@ -43,7 +43,7 @@ func wireSnapshot(t testing.TB) *thresholds.Snapshot {
 	search := thresholds.Scope{Requests: 2, Duration: thresholds.Distribution{Count: 2, SumUs: 3000, MinUs: 1000, MaxUs: 2000}}
 	browse := thresholds.Scope{
 		Requests: 42, Failed: 1, BytesSent: 4100, BytesReceived: 91000,
-		Checks: ptr(80), ChecksPassed: ptr(79), Iterations: ptr(20), DroppedIterations: ptr(0),
+		Checks: ptr(80), ChecksPassed: ptr(79), Iterations: ptr(20), DroppedIterations: ptr(0), InterruptedIterations: ptr(2),
 		Duration: dist(t, values(3, 42)...), IterationDuration: dist(t, values(4, 20)...),
 	}
 	// Checks measured as zero, iterations not measured.
@@ -203,7 +203,7 @@ func TestSnapshotWireRoundTrip(t *testing.T) {
 		t.Errorf("hdr is not the EncodeHistogram text")
 	}
 	for _, key := range []string{"start", "end", "responses", "test", "scenarios", "requests", "failed", "bytes_sent",
-		"bytes_received", "checks", "checks_passed", "dropped_iterations", "duration", "iteration_duration", "steps",
+		"bytes_received", "checks", "checks_passed", "dropped_iterations", "interrupted_iterations", "duration", "iteration_duration", "steps",
 		"count", "sum_us", "min_us", "max_us", "hdr"} {
 		if !strings.Contains(string(b), `"`+key+`":`) {
 			t.Errorf("key %q not written", key)
@@ -407,6 +407,7 @@ func TestDecodeSnapshotRefuses(t *testing.T) {
 		{"duplicate scenario counter", head + `,"scenarios":{"a":{` + scopeKeys + `,"Bytes_Sent":0}}}`, thresholds.ErrMalformedSnapshot, `scenario "a": "bytes_sent" appears twice`},
 		{"duplicate steps", head + `,"scenarios":{"a":{` + scopeKeys + `,"steps":{},"steps":{"b":` + scope + `}}}}`, thresholds.ErrMalformedSnapshot, `scenario "a": "steps" appears twice`},
 		{"duplicate step counter", head + `,"scenarios":{"a":{` + scopeKeys + `,"steps":{"b":{` + scopeKeys + `,"dropped_iterations":1,"dropped_iterations":1}}}}}`, thresholds.ErrMalformedSnapshot, `scenario "a", step "b": "dropped_iterations" appears twice`},
+		{"duplicate interrupted counter, folded", head + `,"scenarios":{"a":{` + scopeKeys + `,"interrupted_iterations":1,"Interrupted_Iterations":null}}}`, thresholds.ErrMalformedSnapshot, `scenario "a": "interrupted_iterations" appears twice`},
 		{"duplicate count", head[:len(head)-1] + `,"ttfb":{` + distKeys + `,"count":1}}}`, thresholds.ErrMalformedSnapshot, `test, ttfb: "count" appears twice`},
 		{"duplicate hdr, folded", head[:len(head)-1] + `,"duration":{` + distKeys + `,"hdr":"x","HDR":"y"}}}`, thresholds.ErrMalformedSnapshot, `test, duration: "hdr" appears twice`},
 		{"duplicate step hdr", head + `,"scenarios":{"a":{` + scopeKeys + `,"steps":{"b":{` + scopeKeys + `,"ttfb":{` + distKeys + `,"hdr":null,"hdr":"x"}}}}}}`, thresholds.ErrMalformedSnapshot, `scenario "a", step "b", ttfb: "hdr" appears twice`},
@@ -422,6 +423,7 @@ func TestDecodeSnapshotRefuses(t *testing.T) {
 		{"bad end", strings.Replace(head, `12:01:00Z`, `noon`, 1) + `}`, thresholds.ErrMalformedSnapshot, `malformed snapshot: end: not an RFC 3339 time`},
 		{"test counter string", strings.Replace(head, `"requests":3`, `"requests":"3"`, 1) + `}`, thresholds.ErrMalformedSnapshot, `malformed snapshot: test.requests: wrong type or out of range`},
 		{"optional counter float", head[:len(head)-1] + `,"checks":1.5}}`, thresholds.ErrMalformedSnapshot, `malformed snapshot: test.checks: wrong type or out of range`},
+		{"interrupted counter string", head[:len(head)-1] + `,"interrupted_iterations":"1"}}`, thresholds.ErrMalformedSnapshot, `malformed snapshot: test.interrupted_iterations: wrong type or out of range`},
 		{"distribution counter exponent", head[:len(head)-1] + `,"ttfb":{` + strings.Replace(distKeys, `"max_us":5`, `"max_us":1e3`, 1) + `}}}`, thresholds.ErrMalformedSnapshot, `malformed snapshot: test.ttfb.max_us: wrong type or out of range`},
 		{"distribution counter overflow", head[:len(head)-1] + `,"ttfb":{` + strings.Replace(distKeys, `"max_us":5`, `"max_us":9223372036854775808`, 1) + `}}}`, thresholds.ErrMalformedSnapshot, `malformed snapshot: test.ttfb.max_us: wrong type or out of range`},
 		{"step hdr number", head + `,"scenarios":{"a":{` + scopeKeys + `,"steps":{"b":{` + scopeKeys + `,"duration":{` + distKeys + `,"hdr":5}}}}}}`, thresholds.ErrMalformedSnapshot, `malformed snapshot: scenario "a", step "b": duration.hdr: not a string`},
@@ -837,6 +839,7 @@ func TestWireMergeEqualsCombined(t *testing.T) {
 	ha, hb, sa := values(37, 120), values(38, 200), values(39, 30)
 	withIter := func(s thresholds.Scope, iters *int64, us []int64) thresholds.Scope {
 		s.Iterations, s.DroppedIterations, s.IterationDuration = iters, ptr(1), dist(t, us...)
+		s.InterruptedIterations = ptr(1)
 		return s
 	}
 	withChecks := func(s thresholds.Scope, n, p int64) thresholds.Scope {
@@ -876,6 +879,7 @@ func TestWireMergeEqualsCombined(t *testing.T) {
 		},
 	}
 	combined.Test.DroppedIterations, combined.Scenarios["browse"].DroppedIterations = ptr(2), ptr(2)
+	combined.Test.InterruptedIterations, combined.Scenarios["browse"].InterruptedIterations = ptr(2), ptr(2)
 	m := wireMerge(t, a, b)
 	if m.Responses != 999 {
 		t.Errorf("responses = %d", m.Responses)

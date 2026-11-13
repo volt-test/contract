@@ -1,0 +1,31 @@
+{
+  "name": "v1 staged definition with load lifecycle keys",
+  "stages": [
+    {
+      "duration": "30s",
+      "target": 10
+    },
+    {
+      "duration": "30s",
+      "target": 0
+    }
+  ],
+  "initial_virtual_users": -4,
+  "stop_grace": "-1s",
+  "ramp_down_grace": "soon",
+  "scenarios": [
+    {
+      "name": "Read",
+      "weight": 1,
+      "steps": [
+        {
+          "name": "Items",
+          "request": {
+            "method": "GET",
+            "url": "https://api.example.com/items"
+          }
+        }
+      ]
+    }
+  ]
+}

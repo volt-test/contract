@@ -511,14 +511,18 @@
             "virtual_users": {
               "maximum": 0
             },
-            "preallocated_vus": {
+            "preallocated_virtual_users": {
               "minimum": 1
+            },
+            "initial_virtual_users": false,
+            "ramp_down_grace": {
+              "maxLength": 0
             }
           },
           "required": [
             "rate",
             "duration",
-            "preallocated_vus"
+            "preallocated_virtual_users"
           ]
         },
         {
@@ -548,13 +552,17 @@
             "virtual_users": {
               "maximum": 0
             },
-            "preallocated_vus": {
+            "preallocated_virtual_users": {
               "minimum": 1
+            },
+            "initial_virtual_users": false,
+            "ramp_down_grace": {
+              "maxLength": 0
             }
           },
           "required": [
             "stages",
-            "preallocated_vus"
+            "preallocated_virtual_users"
           ]
         },
         {
@@ -577,11 +585,15 @@
             "stages": {
               "maxItems": 0
             },
-            "preallocated_vus": {
+            "preallocated_virtual_users": {
               "maximum": 0
             },
-            "max_vus": {
+            "max_virtual_users": {
               "maximum": 0
+            },
+            "initial_virtual_users": false,
+            "ramp_down_grace": {
+              "maxLength": 0
             }
           },
           "required": [
@@ -590,21 +602,39 @@
           ]
         },
         {
+          "anyOf": [
+            {
+              "properties": {
+                "stages": {
+                  "contains": {
+                    "properties": {
+                      "target": {
+                        "minimum": 1
+                      }
+                    },
+                    "required": [
+                      "target"
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "properties": {
+                "initial_virtual_users": {
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "initial_virtual_users"
+              ]
+            }
+          ],
           "properties": {
             "type": {
               "const": "stages"
             },
             "stages": {
-              "contains": {
-                "properties": {
-                  "target": {
-                    "minimum": 1
-                  }
-                },
-                "required": [
-                  "target"
-                ]
-              },
               "minItems": 1
             },
             "rate": {
@@ -619,10 +649,10 @@
             "virtual_users": {
               "maximum": 0
             },
-            "preallocated_vus": {
+            "preallocated_virtual_users": {
               "maximum": 0
             },
-            "max_vus": {
+            "max_virtual_users": {
               "maximum": 0
             }
           },
@@ -660,22 +690,35 @@
             "$ref": "#/$defs/RateStage"
           },
           "type": "array",
-          "description": "Types ramping_rate and stages: the rate, or the number of virtual\nusers, starts at 0 and moves linearly to each stage's target over that\nstage's duration."
+          "description": "Types ramping_rate and stages: the value moves linearly to each\nstage's target over that stage's duration. The rate starts at 0; the\nnumber of virtual users starts at initial_virtual_users."
         },
         "virtual_users": {
           "type": "integer",
           "minimum": 0,
           "description": "Type constant: the scenario's virtual users (at least 1)."
         },
-        "preallocated_vus": {
+        "preallocated_virtual_users": {
           "type": "integer",
           "minimum": 0,
           "description": "Types rate and ramping_rate: virtual users started before the load\nbegins (at least 1)."
         },
-        "max_vus": {
+        "max_virtual_users": {
           "type": "integer",
           "minimum": 0,
-          "description": "Types rate and ramping_rate: most virtual users the load may run\n(default preallocated_vus). When all are busy, an iteration that is\ndue is dropped and counted."
+          "description": "Types rate and ramping_rate: most virtual users the load may run\n(default preallocated_virtual_users). When all are busy, an iteration\nthat is due is dropped and counted."
+        },
+        "initial_virtual_users": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Type stages: virtual users running when the scenario's load starts\n(at start_at); the first stage moves linearly from this number to its\ntarget (default 1; 0 ramps from zero)."
+        },
+        "stop_grace": {
+          "type": "string",
+          "description": "Any type, on a scenario's load: how long each virtual user may finish\nits current iteration when the load's duration or last stage ends,\ne.g. \"30s\" (default \"30s\"; \"0s\" cuts at once). No new iteration\nstarts; one still running is then cancelled and counted in\ninterrupted_iterations. The test-level stop_grace does not apply here."
+        },
+        "ramp_down_grace": {
+          "type": "string",
+          "description": "Type stages: how long a virtual user removed by a stage that lowers\nthe target may finish its current iteration before it exits (default\n\"30s\"; \"0s\" cuts at once). One still running is then cancelled and\ncounted in interrupted_iterations."
         }
       },
       "additionalProperties": false,
@@ -703,7 +746,7 @@
       "required": [
         "duration"
       ],
-      "description": "One stage of a ramping_rate or stages load profile. The rate or the number of virtual users starts at 0 and moves linearly to each stage's target over that stage's duration."
+      "description": "One stage of a ramping_rate or stages load profile. The value moves linearly to each stage's target over that stage's duration; the rate starts at 0 and the number of virtual users at initial_virtual_users."
     },
     "RegionWeight": {
       "properties": {
@@ -1230,7 +1273,7 @@
         },
         "load": {
           "$ref": "#/$defs/Load",
-          "description": "The scenario's own load, run alongside the test-level load model and\nindependent of it: its own virtual users (\"constant\" or \"stages\") or\narrival rate (\"rate\" or \"ramping_rate\"). The scenario takes no weight\nand is never picked by the test-level virtual users. Not allowed on a\nrun_once or teardown scenario. On VoltTest Cloud the backend refuses,\nbefore the run starts, a pool whose peak in a region is below that\nregion's node count, the peak being virtual_users for constant, the\nhighest stage target for stages, and max_vus (or preallocated_vus when\nmax_vus is absent) for rate and ramping_rate."
+          "description": "The scenario's own load, run alongside the test-level load model and\nindependent of it: its own virtual users (\"constant\" or \"stages\") or\narrival rate (\"rate\" or \"ramping_rate\"). The scenario takes no weight\nand is never picked by the test-level virtual users. Not allowed on a\nrun_once or teardown scenario. On VoltTest Cloud the backend refuses,\nbefore the run starts, a pool whose peak in a region is below that\nregion's node count, the peak being virtual_users for constant, the\nlarger of initial_virtual_users and the highest stage target for\nstages, and max_virtual_users (or preallocated_virtual_users when\nmax_virtual_users is absent) for rate and ramping_rate."
         },
         "start_at": {
           "type": "string",
@@ -1676,6 +1719,10 @@
               ]
             }
           }
+        },
+        "initial_virtual_users": false,
+        "ramp_down_grace": {
+          "maxLength": 0
         }
       },
       "required": [
@@ -1695,6 +1742,10 @@
         },
         "stages": {
           "maxItems": 0
+        },
+        "initial_virtual_users": false,
+        "ramp_down_grace": {
+          "maxLength": 0
         },
         "scenarios": {
           "contains": {
@@ -1752,6 +1803,13 @@
         },
         "stages": {
           "maxItems": 0
+        },
+        "initial_virtual_users": false,
+        "ramp_down_grace": {
+          "maxLength": 0
+        },
+        "stop_grace": {
+          "maxLength": 0
         },
         "scenarios": {
           "items": {
@@ -1822,7 +1880,20 @@
         "$ref": "#/$defs/Stage"
       },
       "type": "array",
-      "description": "Staged load: each stage moves to its target number of virtual users\nover its duration. Use instead of virtual_users, duration and ramp_up."
+      "description": "Staged load: the number of virtual users moves linearly from\ninitial_virtual_users to each stage's target over that stage's\nduration. Use instead of virtual_users, duration and ramp_up."
+    },
+    "initial_virtual_users": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Staged load: virtual users running when the load starts (after\nsetup); the first stage moves linearly from this number to its target\n(default 1; 0 ramps from zero). Needs stages."
+    },
+    "stop_grace": {
+      "type": "string",
+      "description": "How long each virtual user may finish its current iteration once the\ntest-level load ends, e.g. \"30s\" (default \"30s\"; \"0s\" cuts at once).\nNo new iteration starts; one still running is then cancelled and\ncounted in interrupted_iterations. Applies to the scenarios without\ntheir own load."
+    },
+    "ramp_down_grace": {
+      "type": "string",
+      "description": "Staged load: how long a virtual user removed by a stage that lowers\nthe target may finish its current iteration before it exits (default\n\"30s\"; \"0s\" cuts at once). One still running is then cancelled and\ncounted in interrupted_iterations. Needs stages."
     },
     "load": {
       "$ref": "#/$defs/Load",
@@ -1832,6 +1903,9 @@
             "rate",
             "ramping_rate"
           ]
+        },
+        "stop_grace": {
+          "maxLength": 0
         }
       },
       "description": "Arrival-rate load: iterations start at a set rate, whatever the\nresponse times. Use instead of virtual_users, duration, ramp_up and\nstages. Only types \"rate\" and \"ramping_rate\" apply here. Leave the\nwhole test-level load model out when every load scenario has its own\nload."

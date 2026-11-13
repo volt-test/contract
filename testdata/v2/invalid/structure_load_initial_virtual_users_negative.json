@@ -1,0 +1,29 @@
+{
+  "schema_version": "2.0",
+  "name": "Invalid load",
+  "stages": [
+    {
+      "duration": "1m",
+      "target": 10
+    },
+    {
+      "duration": "30s",
+      "target": 0
+    }
+  ],
+  "initial_virtual_users": -1,
+  "scenarios": [
+    {
+      "name": "Home",
+      "steps": [
+        {
+          "name": "Get home",
+          "request": {
+            "method": "GET",
+            "url": "https://shop.example.com/"
+          }
+        }
+      ]
+    }
+  ]
+}

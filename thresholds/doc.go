@@ -35,16 +35,23 @@
 //
 // Only the listed percentiles exist: "p99.99" and "ttfb_p42" are errors.
 //
-//	metric                kind        value
-//	error_rate            rate        failed requests / requests
-//	check_rate            rate        passed checks / checks
-//	rps                   throughput  requests per second
-//	requests              count       requests sent
-//	failed                count       failed requests
-//	iterations            count       completed scenario runs
-//	dropped_iterations    count       scenario runs that could not start
-//	bytes_sent            size        request bytes
-//	bytes_received        size        response bytes
+//	metric                  kind        value
+//	error_rate              rate        failed requests / requests
+//	check_rate              rate        passed checks / checks
+//	rps                     throughput  requests per second
+//	requests                count       requests sent
+//	failed                  count       failed requests
+//	iterations              count       completed scenario runs
+//	dropped_iterations      count       scenario runs that could not start
+//	interrupted_iterations  count       scenario runs cut off when a grace ran out
+//	bytes_sent              size        request bytes
+//	bytes_received          size        response bytes
+//
+// An interrupted iteration, one still running when a stop_grace or
+// ramp_down_grace runs out, counts in interrupted_iterations only, not in
+// iterations or iteration_duration. The request it had in flight is not
+// recorded: it counts in neither requests nor failed, so not toward
+// error_rate, nor in duration, ttfb or the byte counters.
 //
 // Metrics returns the full list.
 //
@@ -67,9 +74,10 @@
 //
 // A threshold can be attached to the whole test, a scenario or a step.
 // Every metric is available everywhere except the iteration metrics
-// (iteration_duration and its variants, iterations, dropped_iterations),
-// which describe whole scenario runs and so exist only for the test and
-// its scenarios. Threshold.ValidFor checks this.
+// (iteration_duration and its variants, iterations, dropped_iterations,
+// interrupted_iterations), which describe whole scenario runs and so
+// exist only for the test and its scenarios. Threshold.ValidFor checks
+// this.
 //
 // # Equality
 //
@@ -110,6 +118,7 @@
 //	rps                     Requests / (End - Start)          req/s
 //	requests, failed        Requests, Failed                  "" (a count)
 //	iterations, dropped_... Iterations, DroppedIterations     ""
+//	interrupted_iterations  InterruptedIterations             ""
 //	bytes_sent, _received   BytesSent, BytesReceived          bytes
 //
 // Averages use Count and SumUs, which cover every value, never the
@@ -152,7 +161,8 @@
 // nothing to measure: a distribution with Count 0; a percentile with no
 // histogram, an empty one, or one with another configuration; a rate with
 // a zero denominator; an optional counter (Checks, ChecksPassed,
-// Iterations, DroppedIterations) that is nil because it was not measured;
+// Iterations, DroppedIterations, InterruptedIterations) that is nil
+// because it was not measured;
 // rps over an empty window (End not after Start).
 //
 // Evaluate fails closed on missing scopes. With a nil snapshot every
@@ -206,8 +216,8 @@
 //	 "scenarios": {"NAME": SCOPE plus "steps": {"NAME": SCOPE}}}
 //
 //	SCOPE  "requests", "failed", "bytes_sent", "bytes_received": required
-//	       "checks", "checks_passed", "iterations", "dropped_iterations":
-//	       left out when not measured
+//	       "checks", "checks_passed", "iterations", "dropped_iterations",
+//	       "interrupted_iterations": left out when not measured
 //	       "duration", "ttfb", "iteration_duration": DIST, left out when
 //	       there are no values
 //	DIST   "count", "sum_us", "min_us", "max_us": required, count > 0

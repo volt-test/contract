@@ -15,20 +15,23 @@ import (
 // own load, start_at, cookies, vars and data_format to the problems Parse
 // reports, in order.
 var scenarioLoadFixtureProblems = map[string][]string{
-	"structure_pool_constant_zero_vus.json":    {`scenarios[1].load.virtual_users: is required (at least 1) for type constant`},
-	"structure_pool_constant_no_vus.json":      {`scenarios[1].load.virtual_users: is required (at least 1) for type constant`},
-	"structure_pool_stages_all_zero.json":      {`scenarios[1].load: ` + stagesZero},
-	"structure_pool_constant_rate_keys.json":   {`scenarios[1].load.rate: does not apply to type constant`, `scenarios[1].load.preallocated_vus: does not apply to type constant`, `scenarios[1].load.max_vus: does not apply to type constant`},
-	"structure_pool_stages_constant_keys.json": {`scenarios[1].load.duration: does not apply to type stages`, `scenarios[1].load.virtual_users: does not apply to type stages`},
-	"structure_pool_rate_no_preallocated.json": {`scenarios[1].load.preallocated_vus: is required (at least 1)`},
-	"structure_pool_type_unknown.json":         {`scenarios[1].load.type: must be one of "rate", "ramping_rate", "constant", "stages", got "burst"`},
-	"structure_pool_weight.json":               {`scenarios[1].weight: does not apply to a scenario with its own load, which is never picked by weight`},
-	"structure_pool_run_once.json":             {`scenarios[1].load: does not apply to a run_once scenario, which runs once`},
-	"structure_pool_teardown.json":             {`scenarios[1].load: does not apply to a teardown scenario, which runs once`},
-	"structure_pool_unused_top_level.json":     {`virtual_users: ` + unusedTopLoad, `duration: ` + unusedTopLoad},
-	"structure_pool_top_level_missing.json":    {`virtual_users: is required (at least 1) unless stages or load are set`},
-	"type_pool_string.json":                    {`scenarios[1].load: must be an object`},
-	"type_pool_virtual_users_string.json":      {`scenarios[1].load.virtual_users: must be an integer`},
+	"structure_pool_constant_zero_vus.json":            {`scenarios[1].load.virtual_users: is required (at least 1) for type constant`},
+	"structure_pool_constant_no_vus.json":              {`scenarios[1].load.virtual_users: is required (at least 1) for type constant`},
+	"structure_pool_stages_all_zero.json":              {`scenarios[1].load: ` + stagesZero},
+	"structure_pool_constant_rate_keys.json":           {`scenarios[1].load.rate: does not apply to type constant`, `scenarios[1].load.preallocated_virtual_users: does not apply to type constant`, `scenarios[1].load.max_virtual_users: does not apply to type constant`},
+	"structure_pool_stages_constant_keys.json":         {`scenarios[1].load.duration: does not apply to type stages`, `scenarios[1].load.virtual_users: does not apply to type stages`},
+	"structure_pool_rate_no_preallocated.json":         {`scenarios[1].load.preallocated_virtual_users: is required (at least 1)`},
+	"structure_pool_type_unknown.json":                 {`scenarios[1].load.type: must be one of "rate", "ramping_rate", "constant", "stages", got "burst"`},
+	"structure_pool_weight.json":                       {`scenarios[1].weight: does not apply to a scenario with its own load, which is never picked by weight`},
+	"structure_pool_run_once.json":                     {`scenarios[1].load: does not apply to a run_once scenario, which runs once`},
+	"structure_pool_teardown.json":                     {`scenarios[1].load: does not apply to a teardown scenario, which runs once`},
+	"structure_pool_unused_top_level.json":             {`virtual_users: ` + unusedTopLoad, `duration: ` + unusedTopLoad},
+	"structure_pool_top_level_missing.json":            {`virtual_users: is required (at least 1) unless stages or load are set`},
+	"structure_pool_initial_virtual_users_rate.json":   {`scenarios[1].load.initial_virtual_users: does not apply to type rate`},
+	"structure_pool_ramp_down_grace_constant.json":     {`scenarios[1].load.ramp_down_grace: does not apply to type constant`},
+	"structure_pool_stages_all_zero_initial_zero.json": {`scenarios[1].load: ` + stagesZero},
+	"type_pool_string.json":                            {`scenarios[1].load: must be an object`},
+	"type_pool_virtual_users_string.json":              {`scenarios[1].load.virtual_users: must be an integer`},
 
 	"structure_start_at_without_load.json": {`scenarios[0].start_at: needs a load on this scenario`},
 	"structure_start_at_zero.json":         {`scenarios[1].start_at: must be greater than zero; leave it out to start with the load`},
@@ -64,7 +67,7 @@ var scenarioLoadFixturePrefixes = []string{"structure_pool_", "type_pool_", "str
 	"structure_cookies_", "type_cookies_", "structure_clear_cookies_", "type_clear_cookies_", "structure_vars_", "type_vars_", "structure_data_format_"}
 
 const (
-	stagesZero     = "never exceeds 0 virtual users, so the scenario would do nothing; set a stage target above 0"
+	stagesZero     = "never exceeds 0 virtual users, so the scenario would do nothing; set a stage target or initial_virtual_users above 0"
 	unusedTopLoad  = "applies to no scenario: every load scenario has its own load"
 	badCookieName  = "is not a valid cookie name: use letters, digits and !#$%&'*+-.^_`|~, without spaces, \"=\", \";\" or other separators"
 	badCookieValue = `must not contain a space, '"', ",", ";", "\", a control character or non-ASCII outside ${...} references`
@@ -154,12 +157,26 @@ func TestScenarioLoadRules(t *testing.T) {
 	}{
 		{"constant with one virtual user", constant("virtual_users", 1), nil, nil, nil, false},
 		{"constant with zero values of the other keys", constant("rate", 0, "time_unit", "", "stages", []any{},
-			"preallocated_vus", 0, "max_vus", 0), nil, nil, nil, false},
+			"preallocated_virtual_users", 0, "max_virtual_users", 0), nil, nil, nil, false},
 		{"stages to 1", stages(stage("1m", 0), stage("1m", 1)), nil, nil, nil, false},
 		{"stages with zero values of the other keys", map[string]any{"type": "stages", "stages": []any{stage("1m", 2)},
-			"rate": 0, "time_unit": "", "duration": "", "virtual_users": 0, "preallocated_vus": 0, "max_vus": 0}, nil, nil, nil, false},
-		{"rate", map[string]any{"type": "rate", "rate": 5, "duration": "1m", "preallocated_vus": 1}, nil, nil, nil, false},
-		{"ramping rate", map[string]any{"type": "ramping_rate", "stages": []any{stage("1m", 5)}, "preallocated_vus": 1}, nil, nil, nil, false},
+			"rate": 0, "time_unit": "", "duration": "", "virtual_users": 0, "preallocated_virtual_users": 0, "max_virtual_users": 0}, nil, nil, nil, false},
+		{"stages from initial_virtual_users to 0", map[string]any{"type": "stages", "initial_virtual_users": 10,
+			"stages": []any{stage("1m", 0)}}, nil, nil, nil, false},
+		{"all-zero stages from initial_virtual_users 1", map[string]any{"type": "stages", "initial_virtual_users": 1,
+			"stages": []any{stage("1m", 0), map[string]any{"duration": "1m"}}}, nil, nil, nil, false},
+		{"stages from initial_virtual_users 0", map[string]any{"type": "stages", "initial_virtual_users": 0,
+			"stages": []any{stage("1m", 4)}, "ramp_down_grace": "0s"}, nil, nil, nil, false},
+		{"constant with stop_grace 0s", constant("stop_grace", "0s"), nil, nil, nil, false},
+		{"stages with stop_grace 0s", map[string]any{"type": "stages", "stages": []any{stage("1m", 2)}, "stop_grace": "0s"},
+			nil, nil, nil, false},
+		{"rate with stop_grace 0s", map[string]any{"type": "rate", "rate": 5, "duration": "1m", "preallocated_virtual_users": 1,
+			"stop_grace": "0s"}, nil, nil, nil, false},
+		{"ramping rate with stop_grace 0s", map[string]any{"type": "ramping_rate", "stages": []any{stage("1m", 5)},
+			"preallocated_virtual_users": 1, "stop_grace": "0s"}, nil, nil, nil, false},
+		{"pool lifecycle keys with zero values", constant("stop_grace", "", "ramp_down_grace", ""), nil, nil, nil, false},
+		{"rate", map[string]any{"type": "rate", "rate": 5, "duration": "1m", "preallocated_virtual_users": 1}, nil, nil, nil, false},
+		{"ramping rate", map[string]any{"type": "ramping_rate", "stages": []any{stage("1m", 5)}, "preallocated_virtual_users": 1}, nil, nil, nil, false},
 		{"start_at", constant(), nil, []any{"start_at", "1m30s"}, nil, false},
 		{"start_at empty reads as absent", nil, nil, []any{"start_at", ""}, nil, false},
 		{"weight 0 reads as absent", constant(), nil, []any{"weight", 0}, nil, false},
@@ -196,18 +213,47 @@ func TestScenarioLoadRules(t *testing.T) {
 			"scenarios[1].load.stages[0].target: must not be negative"}, false},
 		{"stages without a stage duration", stages(map[string]any{"target": 1}), nil, nil, []string{
 			"scenarios[1].load.stages[0].duration: is required"}, false},
-		{"stages with time_unit, rate and max_vus", map[string]any{"type": "stages", "stages": []any{stage("1m", 1)},
-			"time_unit": "1s", "rate": 1, "max_vus": 2}, nil, nil, []string{
+		{"stages with time_unit, rate and max_virtual_users", map[string]any{"type": "stages", "stages": []any{stage("1m", 1)},
+			"time_unit": "1s", "rate": 1, "max_virtual_users": 2}, nil, nil, []string{
 			"scenarios[1].load.rate: does not apply to type stages",
 			"scenarios[1].load.time_unit: does not apply to type stages",
-			"scenarios[1].load.max_vus: does not apply to type stages"}, false},
-		{"rate with virtual_users", map[string]any{"type": "rate", "rate": 5, "duration": "1m", "preallocated_vus": 1,
+			"scenarios[1].load.max_virtual_users: does not apply to type stages"}, false},
+		{"rate with virtual_users", map[string]any{"type": "rate", "rate": 5, "duration": "1m", "preallocated_virtual_users": 1,
 			"virtual_users": 3}, nil, nil, []string{"scenarios[1].load.virtual_users: does not apply to type rate"}, false},
-		{"ramping rate all zero", map[string]any{"type": "ramping_rate", "stages": []any{stage("1m", 0)}, "preallocated_vus": 1},
+		{"ramping rate all zero", map[string]any{"type": "ramping_rate", "stages": []any{stage("1m", 0)}, "preallocated_virtual_users": 1},
 			nil, nil, []string{"scenarios[1].load: " + rampingZero[len("load: "):]}, false},
 		{"ramping rate with virtual_users", map[string]any{"type": "ramping_rate", "stages": []any{stage("1m", 1)},
-			"preallocated_vus": 1, "virtual_users": 2}, nil, nil, []string{
+			"preallocated_virtual_users": 1, "virtual_users": 2}, nil, nil, []string{
 			"scenarios[1].load.virtual_users: does not apply to type ramping_rate"}, false},
+		{"constant with initial_virtual_users 0", constant("initial_virtual_users", 0), nil, nil, []string{
+			"scenarios[1].load.initial_virtual_users: does not apply to type constant"}, false},
+		{"ramping rate with initial_virtual_users and ramp_down_grace", map[string]any{"type": "ramping_rate",
+			"stages": []any{stage("1m", 1)}, "preallocated_virtual_users": 1, "initial_virtual_users": 1, "ramp_down_grace": "1s"},
+			nil, nil, []string{
+				"scenarios[1].load.initial_virtual_users: does not apply to type ramping_rate",
+				"scenarios[1].load.ramp_down_grace: does not apply to type ramping_rate"}, false},
+		{"stages with a negative initial_virtual_users", map[string]any{"type": "stages", "initial_virtual_users": -1,
+			"stages": []any{stage("1m", 0)}}, nil, nil, []string{
+			"scenarios[1].load.initial_virtual_users: must not be negative",
+			"scenarios[1].load: " + stagesZero}, false},
+		{"stages with a negative ramp_down_grace", map[string]any{"type": "stages", "stages": []any{stage("1m", 1)},
+			"ramp_down_grace": "-1s"}, nil, nil, []string{"scenarios[1].load.ramp_down_grace: must not be negative"}, true},
+		{"constant with a bad stop_grace", constant("stop_grace", "soon"), nil, nil, []string{
+			`scenarios[1].load.stop_grace: must be a duration such as "30s" or "1m30s", got "soon"`}, true},
+		{"test-level stop_grace when every load scenario has its own load", constant(), func(m map[string]any) {
+			noTop(m)
+			m["stop_grace"] = "10s"
+		}, nil, []string{"stop_grace: " + unusedTopLoad}, false},
+		{"test-level lifecycle keys when every load scenario has its own load", constant(), func(m map[string]any) {
+			noTop(m)
+			m["initial_virtual_users"] = 0
+			m["ramp_down_grace"] = "0s"
+		}, nil, []string{"initial_virtual_users: " + unusedTopLoad, "ramp_down_grace: " + unusedTopLoad}, false},
+		{"test-level lifecycle zero values when every load scenario has its own load", constant(), func(m map[string]any) {
+			noTop(m)
+			m["stop_grace"] = ""
+			m["ramp_down_grace"] = ""
+		}, nil, nil, false},
 		{"empty load", map[string]any{}, nil, nil, []string{
 			`scenarios[1].load.type: is required (one of "rate", "ramping_rate", "constant", "stages")`}, false},
 		{"negative start_at", constant(), nil, []any{"start_at", "-1s"}, []string{
@@ -223,7 +269,7 @@ func TestScenarioLoadRules(t *testing.T) {
 		}, nil, []string{"stages: " + unusedTopLoad}, false},
 		{"test-level load when every load scenario has its own load", constant(), func(m map[string]any) {
 			noTop(m)
-			m["load"] = map[string]any{"type": "rate", "rate": 1, "duration": "1m", "preallocated_vus": 1}
+			m["load"] = map[string]any{"type": "rate", "rate": 1, "duration": "1m", "preallocated_virtual_users": 1}
 		}, nil, []string{"load: " + unusedTopLoad}, false},
 		{"test-level ramp_up when every load scenario has its own load", constant(), func(m map[string]any) {
 			noTop(m)
@@ -346,10 +392,10 @@ func TestScenarioLoadRoundTrip(t *testing.T) {
 		t.Errorf("Checkout = load %+v, start_at %q", checkout.Load, checkout.StartAt)
 	}
 	spike := d.Scenarios[3].Load
-	if spike == nil || spike.Type != definition.LoadStages || len(spike.Stages) != 3 || spike.PreallocatedVUs != 0 {
+	if spike == nil || spike.Type != definition.LoadStages || len(spike.Stages) != 3 || spike.PreallocatedVirtualUsers != 0 {
 		t.Errorf("Spike load = %+v", spike)
 	}
-	// A pool marshals without preallocated_vus.
+	// A pool marshals without preallocated_virtual_users.
 	b, err := json.Marshal(checkout.Load)
 	if err != nil {
 		t.Fatal(err)

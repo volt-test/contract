@@ -99,6 +99,9 @@ var v1ReadSet = map[string]string{
 	"scenarios[].steps[].max_redirects":       "v2",
 	"scenarios[].steps[].once_per_vu":         "v2",
 	"load":                                    "v2",
+	"initial_virtual_users":                   "v2",
+	"stop_grace":                              "v2",
+	"ramp_down_grace":                         "v2",
 	"scenarios[].steps[].request.body_type":   "v2",
 	"scenarios[].steps[].request.body_json":   "v2",
 	"scenarios[].steps[].request.fields":      "v2",
@@ -822,6 +825,56 @@ func TestV1DropsLoadKey(t *testing.T) {
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s: v1 with load:\n got %+v\nwant %+v", name, got, want)
+		}
+	}
+}
+
+// TestV1DropsLoadLifecycleKeys checks that load_lifecycle_ignored.json, a
+// v1 staged definition carrying initial_virtual_users, stop_grace and
+// ramp_down_grace with values v2 rejects, parses exactly as it does
+// without them, and that values of the wrong JSON type and case variants
+// are dropped as well: a v1 staged load still starts at 0 with no grace.
+func TestV1DropsLoadLifecycleKeys(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "testdata", "v1", "cli", "load_lifecycle_ignored.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := []string{`"initial_virtual_users"`, `"stop_grace"`, `"ramp_down_grace"`}
+	stripped := withoutV2OnlyKeys(t, raw)
+	for _, k := range keys {
+		if !bytes.Contains(raw, []byte(k)) || bytes.Contains(stripped, []byte(k)) {
+			t.Fatalf("the fixture's %s key was not removed: %s", k, stripped)
+		}
+	}
+	want, err := Parse(stripped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(want.Stages) != 2 || want.Stages[0].Target != 10 {
+		t.Fatalf("stages = %+v; the keys next to the lifecycle keys must still be read", want.Stages)
+	}
+	docs := map[string][]byte{"fixture": raw}
+	for name, kv := range map[string]string{
+		"strings":       `"initial_virtual_users":"5","stop_grace":30,"ramp_down_grace":true`,
+		"nulls":         `"initial_virtual_users":null,"stop_grace":null,"ramp_down_grace":null`,
+		"objects":       `"initial_virtual_users":{},"stop_grace":[],"ramp_down_grace":{"x":1}`,
+		"case variants": `"Initial_Virtual_Users":-1,"STOP_GRACE":"-1s","Ramp_Down_Grace":"soon"`,
+	} {
+		docs[name] = bytes.Replace(stripped, []byte(`"name":`), []byte(kv+`,"name":`), 1)
+	}
+	for name, doc := range docs {
+		got, err := Parse(doc)
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", name, err, doc)
+		}
+		if !got.IsV1() || len(got.V1TypeProblems) != 0 {
+			t.Errorf("%s: IsV1 %v, V1TypeProblems %v", name, got.IsV1(), got.V1TypeProblems)
+		}
+		if got.InitialVirtualUsers != nil || got.StopGrace != "" || got.RampDownGrace != "" {
+			t.Errorf("%s: kept initial %v, stop_grace %q, ramp_down_grace %q", name, got.InitialVirtualUsers, got.StopGrace, got.RampDownGrace)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: v1 with lifecycle keys:\n got %+v\nwant %+v", name, got, want)
 		}
 	}
 }

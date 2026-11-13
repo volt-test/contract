@@ -55,6 +55,7 @@ const (
 	famBytesReceived
 	famIterations
 	famDroppedIterations
+	famInterruptedIterations
 )
 
 // agg is how a duration metric summarises its distribution.
@@ -89,7 +90,7 @@ type Metric struct {
 // its scenarios.
 func (m Metric) stepScoped() bool {
 	switch m.family {
-	case famIterationDuration, famIterations, famDroppedIterations:
+	case famIterationDuration, famIterations, famDroppedIterations, famInterruptedIterations:
 		return false
 	}
 	return true
@@ -145,6 +146,7 @@ func buildCatalog() map[string]Metric {
 		{Name: "failed", Kind: KindCount, family: famFailed},
 		{Name: "iterations", Kind: KindCount, family: famIterations},
 		{Name: "dropped_iterations", Kind: KindCount, family: famDroppedIterations},
+		{Name: "interrupted_iterations", Kind: KindCount, family: famInterruptedIterations},
 		{Name: "bytes_sent", Kind: KindSize, family: famBytesSent},
 		{Name: "bytes_received", Kind: KindSize, family: famBytesReceived},
 	} {

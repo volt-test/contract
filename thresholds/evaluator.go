@@ -168,6 +168,8 @@ func measure(s *Snapshot, sc *Scope, m Metric) (v, display float64, ok bool) {
 		return optionalCount(sc.Iterations)
 	case famDroppedIterations:
 		return optionalCount(sc.DroppedIterations)
+	case famInterruptedIterations:
+		return optionalCount(sc.InterruptedIterations)
 	}
 	return 0, 0, false
 }
