@@ -61,6 +61,11 @@ the v1 engines read and loses nothing on a round trip.
   keys with the wrong JSON type and other cases. It sets
   `auto_handle_cookies: true`, not `false`, so its v0.4.0 recording also
   holds for the current code.
+  `load_lifecycle_ignored.json` does the same for the top-level
+  `initial_virtual_users`, `stop_grace` and `ramp_down_grace` next to
+  `stages`, with values v2 rejects (a negative count, a negative grace, a
+  grace that is not a duration); `TestV1DropsLoadLifecycleKeys` checks
+  it, and the keys with the wrong JSON type, `null` and other cases.
 
 Every `*_ignored.json` fixture keeps the right JSON type for each value:
 `TestV1RewriteMatchesDirectDecode` decodes every v1 fixture with plain
@@ -104,7 +109,12 @@ one, contains "secret".
   and a fuzz seed.
   `load_rate.json` and `load_ramping_rate.json` have one `load` of each
   type with every key; zero values and the other accepted cases are in
-  `TestLoadRules` in `definition/load_test.go`.
+  `TestLoadRules` in `definition/load_test.go`. `load_lifecycle.json` has
+  test-level `stages` with an explicit `initial_virtual_users: 0`,
+  `stop_grace: "0s"` and a `ramp_down_grace`, a `stages` pool ramping from
+  `initial_virtual_users` to 0 with both graces, a `rate` pool with a
+  `stop_grace`, and `interrupted_iterations` thresholds on the test and a
+  scenario; `TestLoadLifecycleRoundTrip` checks the explicit 0 survives.
   `setup_teardown.json` has two `run_once` scenarios (the second reads the
   first's global), two load scenarios and a `teardown` scenario reading
   both globals, with `run_once: false`, `teardown: false` and `weight: 0`
@@ -205,7 +215,11 @@ one, contains "secret".
     `unknown_load_stage.json` are `unknown_*` fixtures.
     `structure_load_constant_top_level.json` and
     `structure_load_stages_top_level.json` use a scenario-only type at the
-    top level.
+    top level. `structure_load_initial_virtual_users_*`,
+    `structure_load_ramp_down_grace_rate.json`,
+    `structure_load_stop_grace_negative.json` and
+    `structure_load_stop_grace_on_load.json` cover the test-level
+    `initial_virtual_users`, `stop_grace` and `ramp_down_grace`.
   - A scenario's own load, `start_at`, cookies, variables and data
     formats have the families `structure_pool_*`, `type_pool_*`,
     `structure_start_at_*`, `type_start_at_*`, `structure_cookies_*`,
@@ -214,8 +228,10 @@ one, contains "secret".
     `scenarioLoadFixtureProblems` in `definition/scenario_load_test.go`
     lists the problems each must produce, and the test fails on an
     unlisted fixture of these families. They cover a `constant` pool of 0
-    virtual users (written and absent), an all-zero `stages` pool, keys of
-    another load type, an arrival-rate pool without `preallocated_vus`, an
+    virtual users (written and absent), an all-zero `stages` pool (also
+    with `initial_virtual_users: 0`), keys of another load type
+    (`initial_virtual_users` and `ramp_down_grace` included), an
+    arrival-rate pool without `preallocated_virtual_users`, an
     unknown type, a pool with a weight, on a `run_once` and on a
     `teardown` scenario, a test-level model no scenario uses and one
     missing where a scenario needs it, `start_at` without a `load`, zero
@@ -285,6 +301,9 @@ could be arrays, so that later type changes can be checked against it:
   `definition/marshal_test.go` fails if any of them changes, and if a v1
   fixture has no recording (older code reads every v1 fixture). v2
   fixtures added later have none; `TestV2RoundTrip` covers them.
+  `v2/valid/load_rate.json` and `load_ramping_rate.json` were re-recorded
+  when their `load` keys were renamed to `preallocated_virtual_users` and
+  `max_virtual_users`.
 - `v1_header_array.json` is a v1 definition whose header values are
   arrays, an empty array, numbers, an object, `true` and `null`, next to
   string values. `v1_header_array.problems.json` and

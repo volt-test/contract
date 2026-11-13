@@ -6,8 +6,8 @@
     "rate": 500,
     "time_unit": "1s",
     "duration": "0s",
-    "preallocated_vus": 200,
-    "max_vus": 1000
+    "preallocated_virtual_users": 200,
+    "max_virtual_users": 1000
   },
   "scenarios": [
     {

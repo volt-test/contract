@@ -45,7 +45,7 @@
     },
     {
       "name": "API",
-      "load": {"type": "rate", "rate": 100, "time_unit": "1s", "duration": "3m", "preallocated_vus": 10, "max_vus": 50},
+      "load": {"type": "rate", "rate": 100, "time_unit": "1s", "duration": "3m", "preallocated_virtual_users": 10, "max_virtual_users": 50},
       "steps": [
         {"name": "Stock", "request": {"method": "GET", "url": "https://shop.example.com/api/stock"}}
       ]
@@ -56,7 +56,7 @@
       "load": {
         "type": "ramping_rate",
         "stages": [{"duration": "1m", "target": 20}, {"duration": "1m", "target": 0}],
-        "preallocated_vus": 2
+        "preallocated_virtual_users": 2
       },
       "steps": [
         {"name": "Prices", "request": {"method": "GET", "url": "https://shop.example.com/api/prices"}}

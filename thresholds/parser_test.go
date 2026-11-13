@@ -15,7 +15,7 @@ import (
 func TestMetrics(t *testing.T) {
 	want := []string{
 		"avg", "bytes_received", "bytes_sent", "check_rate", "dropped_iterations", "error_rate", "failed",
-		"iteration_duration", "iteration_duration_avg", "iteration_duration_max", "iteration_duration_min",
+		"interrupted_iterations", "iteration_duration", "iteration_duration_avg", "iteration_duration_max", "iteration_duration_min",
 		"iteration_duration_p50", "iteration_duration_p75", "iteration_duration_p90", "iteration_duration_p95",
 		"iteration_duration_p99", "iteration_duration_p99.9",
 		"iterations", "max", "min",
@@ -38,7 +38,7 @@ func kindOf(name string) thresholds.Kind {
 	switch name {
 	case "error_rate", "check_rate":
 		return thresholds.KindRate
-	case "requests", "failed", "iterations", "dropped_iterations":
+	case "requests", "failed", "iterations", "dropped_iterations", "interrupted_iterations":
 		return thresholds.KindCount
 	case "bytes_sent", "bytes_received":
 		return thresholds.KindSize
@@ -84,6 +84,21 @@ func TestParseEveryMetric(t *testing.T) {
 	}
 	if err := th.ValidFor(thresholds.ScopeTest); err != nil {
 		t.Errorf("dropped_iterations == 0 on the test: %v", err)
+	}
+	th, err = thresholds.Parse("interrupted_iterations == 0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if th.Metric.Name != "interrupted_iterations" || th.Metric.Kind != thresholds.KindCount || th.Op != thresholds.OpEQ || th.Value != 0 {
+		t.Errorf("interrupted_iterations == 0 parsed as %+v", th)
+	}
+	for _, k := range []thresholds.ScopeKind{thresholds.ScopeTest, thresholds.ScopeScenario} {
+		if err := th.ValidFor(k); err != nil {
+			t.Errorf("interrupted_iterations == 0 on the %s: %v", k, err)
+		}
+	}
+	if err := th.ValidFor(thresholds.ScopeStep); err == nil {
+		t.Error("interrupted_iterations == 0 is accepted on a step")
 	}
 }
 
@@ -149,6 +164,7 @@ func TestParseValues(t *testing.T) {
 		{"failed == 0", 0},
 		{"iterations >= 10.0", 10},
 		{"dropped_iterations == 0", 0},
+		{"interrupted_iterations == 3", 3},
 		// Throughput.
 		{"rps > 100", 100},
 		{"rps > 0.25", 0.25},
@@ -203,6 +219,8 @@ func TestParseErrors(t *testing.T) {
 		{"iteration_duration_p1 < 5ms", 0, `iteration_duration takes avg`},
 		{"P95 < 5ms", 0, `metric names are lowercase: "p95"`},
 		{"latency < 5ms", 0, `unknown metric "latency"; the metrics are avg`},
+		{"interrupted < 5", 0, `iterations, dropped_iterations and interrupted_iterations`},
+		{"interrupted_iterations > 1ms", 26, `interrupted_iterations is a count`},
 		{"p95", 3, "missing operator after p95"},
 		{"p95 5ms", 4, `expected an operator (<, <=, >, >= or ==) after p95, got "5"`},
 		{"p95 = 5ms", 4, `use "==" to compare for equality, not "="`},
@@ -336,14 +354,14 @@ func TestParseErrorText(t *testing.T) {
 
 // Which metrics each scope accepts.
 func TestValidFor(t *testing.T) {
-	notOnSteps := map[string]bool{"iterations": true, "dropped_iterations": true}
+	notOnSteps := map[string]bool{"iterations": true, "dropped_iterations": true, "interrupted_iterations": true}
 	for _, name := range thresholds.Metrics() {
 		if strings.HasPrefix(name, "iteration_duration") {
 			notOnSteps[name] = true
 		}
 	}
-	if len(notOnSteps) != 12 {
-		t.Fatalf("%d metrics not on steps, want 12", len(notOnSteps))
+	if len(notOnSteps) != 13 {
+		t.Fatalf("%d metrics not on steps, want 13", len(notOnSteps))
 	}
 	sample := map[thresholds.Kind]string{
 		thresholds.KindDuration: "1s", thresholds.KindRate: "1%", thresholds.KindCount: "1",
@@ -436,6 +454,7 @@ func TestString(t *testing.T) {
 		"check_rate>=99.990%":         "check_rate >= 99.99%",
 		"requests==010":               "requests == 10",
 		"dropped_iterations == 0":     "dropped_iterations == 0",
+		"interrupted_iterations==00":  "interrupted_iterations == 0",
 		"rps>0.10":                    "rps > 0.1",
 		"bytes_sent < 1kib":           "bytes_sent < 1.024kb",
 		"bytes_sent < 1500000":        "bytes_sent < 1.5mb",

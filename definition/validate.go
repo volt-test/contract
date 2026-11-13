@@ -40,8 +40,9 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 	ps.duration("http_timeout", d.HTTPTimeout)
 	// Load model: load alone, non-empty stages, or virtual_users (at least
 	// 1) with optional duration and ramp_up. Without duration each virtual
-	// user runs its scenario once. Zero values count as absent. When every
-	// load scenario has its own load, there is none.
+	// user runs its scenario once. Zero values count as absent, except
+	// initial_virtual_users, where 0 is a value. When every load scenario
+	// has its own load, there is none.
 	if ownLoadOnly(d) {
 		for _, k := range []struct {
 			key string
@@ -52,6 +53,9 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 			{"ramp_up", d.RampUp != ""},
 			{"stages", len(d.Stages) > 0},
 			{"load", d.Load != nil},
+			{"initial_virtual_users", d.InitialVirtualUsers != nil},
+			{"ramp_down_grace", d.RampDownGrace != ""},
+			{"stop_grace", d.StopGrace != ""},
 		} {
 			if k.set {
 				ps.add(k.key, unusedTopLoadMessage)
@@ -81,6 +85,9 @@ func validateV2(d *Definition, objectForms map[string]bool) *ValidationError {
 			ps.positiveDuration(p+".duration", s.Duration, "")
 		}
 		ps.nonNegative(p+".target", s.Target)
+	}
+	if !ownLoadOnly(d) {
+		validateLoadLifecycle(&ps, d)
 	}
 
 	baseURL := ""

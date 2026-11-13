@@ -30,9 +30,9 @@ var (
 // is 0.
 const rampingZeroMessage = "never exceeds a rate of 0, so the run would do nothing; set a stage target above 0"
 
-// stagesZeroMessage refuses a stages load whose every stage target is 0:
-// a pool without virtual users.
-const stagesZeroMessage = "never exceeds 0 virtual users, so the scenario would do nothing; set a stage target above 0"
+// stagesZeroMessage refuses a stages load whose every stage target is 0
+// and that starts with no virtual users: a pool without virtual users.
+const stagesZeroMessage = "never exceeds 0 virtual users, so the scenario would do nothing; set a stage target or initial_virtual_users above 0"
 
 // unusedTopLoadMessage refuses a test-level load model when every load
 // scenario has its own load.
@@ -65,6 +65,30 @@ func validateLoad(ps *problems, d *Definition) {
 	}
 	ps.oneOf("load.type", string(l.Type), testLoadTypes)
 	validateRateLoad(ps, "load", l)
+	if l.StopGrace != "" {
+		ps.add("load.stop_grace", "does not apply to the test-level load; use the top-level stop_grace")
+	}
+}
+
+// validateLoadLifecycle checks the test-level initial_virtual_users,
+// stop_grace and ramp_down_grace when the test-level model applies:
+// stop_grace with any model, the other two with stages only.
+func validateLoadLifecycle(ps *problems, d *Definition) {
+	if d.InitialVirtualUsers != nil {
+		if len(d.Stages) > 0 {
+			ps.nonNegative("initial_virtual_users", *d.InitialVirtualUsers)
+		} else {
+			ps.add("initial_virtual_users", "needs stages")
+		}
+	}
+	ps.duration("stop_grace", d.StopGrace)
+	if d.RampDownGrace != "" {
+		if len(d.Stages) > 0 {
+			ps.duration("ramp_down_grace", d.RampDownGrace)
+		} else {
+			ps.add("ramp_down_grace", "needs stages")
+		}
+	}
 }
 
 // validateScenarioLoad checks the load of the scenario at p.
@@ -86,36 +110,44 @@ func validateScenarioLoad(ps *problems, p string, l *Load) {
 		} else {
 			ps.positiveDuration(lp+".duration", l.Duration, "")
 		}
-		notForType(ps, lp, l, "rate", "time_unit", "stages", "preallocated_vus", "max_vus")
+		notForType(ps, lp, l, "rate", "time_unit", "stages", "preallocated_virtual_users", "max_virtual_users",
+			"initial_virtual_users", "ramp_down_grace")
 	case LoadStages:
 		if len(l.Stages) == 0 {
 			ps.add(lp+".stages", "is required for type stages (at least one stage)")
 		}
-		if loadStages(ps, lp, l.Stages) {
+		if l.InitialVirtualUsers != nil {
+			ps.nonNegative(lp+".initial_virtual_users", *l.InitialVirtualUsers)
+		}
+		// A pool that starts with virtual users may ramp to 0.
+		if loadStages(ps, lp, l.Stages) && (l.InitialVirtualUsers == nil || *l.InitialVirtualUsers <= 0) {
 			ps.add(lp, stagesZeroMessage)
 		}
-		notForType(ps, lp, l, "rate", "time_unit", "duration", "virtual_users", "preallocated_vus", "max_vus")
+		ps.duration(lp+".ramp_down_grace", l.RampDownGrace)
+		notForType(ps, lp, l, "rate", "time_unit", "duration", "virtual_users", "preallocated_virtual_users", "max_virtual_users")
 	}
+	ps.duration(lp+".stop_grace", l.StopGrace)
 }
 
 // validateRateLoad applies the rules of the arrival-rate types to the load
-// at lp. The preallocated_vus and max_vus rules apply to any type, so the
-// test-level load reports them next to an unknown type.
+// at lp. The preallocated_virtual_users and max_virtual_users rules apply
+// to any type, so the test-level load reports them next to an unknown type.
 func validateRateLoad(ps *problems, lp string, l *Load) {
 	if l.TimeUnit != "" {
 		ps.positiveDuration(lp+".time_unit", l.TimeUnit, "")
 	}
 	switch {
-	case l.PreallocatedVUs < 0:
-		ps.add(lp+".preallocated_vus", "must not be negative")
-	case l.PreallocatedVUs == 0:
-		ps.add(lp+".preallocated_vus", "is required (at least 1)")
+	case l.PreallocatedVirtualUsers < 0:
+		ps.add(lp+".preallocated_virtual_users", "must not be negative")
+	case l.PreallocatedVirtualUsers == 0:
+		ps.add(lp+".preallocated_virtual_users", "is required (at least 1)")
 	}
 	switch {
-	case l.MaxVUs < 0:
-		ps.add(lp+".max_vus", "must not be negative")
-	case l.MaxVUs > 0 && l.PreallocatedVUs > 0 && l.MaxVUs < l.PreallocatedVUs:
-		ps.add(lp+".max_vus", fmt.Sprintf("must be at least preallocated_vus (%d), got %d", l.PreallocatedVUs, l.MaxVUs))
+	case l.MaxVirtualUsers < 0:
+		ps.add(lp+".max_virtual_users", "must not be negative")
+	case l.MaxVirtualUsers > 0 && l.PreallocatedVirtualUsers > 0 && l.MaxVirtualUsers < l.PreallocatedVirtualUsers:
+		ps.add(lp+".max_virtual_users", fmt.Sprintf("must be at least preallocated_virtual_users (%d), got %d",
+			l.PreallocatedVirtualUsers, l.MaxVirtualUsers))
 	}
 
 	switch l.Type {
@@ -131,7 +163,7 @@ func validateRateLoad(ps *problems, lp string, l *Load) {
 		} else {
 			ps.positiveDuration(lp+".duration", l.Duration, "")
 		}
-		notForType(ps, lp, l, "stages", "virtual_users")
+		notForType(ps, lp, l, "stages", "virtual_users", "initial_virtual_users", "ramp_down_grace")
 	case LoadRampingRate:
 		if l.Rate != 0 {
 			ps.add(lp+".rate", "does not apply to type ramping_rate; set each stage's target")
@@ -145,7 +177,7 @@ func validateRateLoad(ps *problems, lp string, l *Load) {
 		if loadStages(ps, lp, l.Stages) {
 			ps.add(lp, rampingZeroMessage)
 		}
-		notForType(ps, lp, l, "virtual_users")
+		notForType(ps, lp, l, "virtual_users", "initial_virtual_users", "ramp_down_grace")
 	}
 }
 
@@ -170,7 +202,8 @@ func loadStages(ps *problems, lp string, stages []RateStage) (allZero bool) {
 }
 
 // notForType reports each of keys that the load at lp sets although its
-// type takes no such key. A zero value reads as absent.
+// type takes no such key. A zero value reads as absent, except for
+// initial_virtual_users, where 0 is a value.
 func notForType(ps *problems, lp string, l *Load, keys ...string) {
 	for _, k := range keys {
 		set := false
@@ -185,10 +218,14 @@ func notForType(ps *problems, lp string, l *Load, keys ...string) {
 			set = len(l.Stages) > 0
 		case "virtual_users":
 			set = l.VirtualUsers != 0
-		case "preallocated_vus":
-			set = l.PreallocatedVUs != 0
-		case "max_vus":
-			set = l.MaxVUs != 0
+		case "preallocated_virtual_users":
+			set = l.PreallocatedVirtualUsers != 0
+		case "max_virtual_users":
+			set = l.MaxVirtualUsers != 0
+		case "initial_virtual_users":
+			set = l.InitialVirtualUsers != nil
+		case "ramp_down_grace":
+			set = l.RampDownGrace != ""
 		}
 		if set {
 			ps.add(lp+"."+k, "does not apply to type "+string(l.Type))
@@ -197,10 +234,12 @@ func notForType(ps *problems, lp string, l *Load, keys ...string) {
 }
 
 // UsesTestLoad reports whether the test-level load model (virtual_users,
-// duration, ramp_up, stages and load) runs any scenario: whether some load
-// scenario has no Load of its own. When it is false and the definition has
-// a load scenario, Parse refuses each of those keys that holds a value; a
-// key holding its zero value (0, "", []) reads as absent.
+// duration, ramp_up, stages, load, initial_virtual_users, ramp_down_grace
+// and stop_grace) runs any scenario: whether some load scenario has no
+// Load of its own. When it is false and the definition has a load
+// scenario, Parse refuses each of those keys that holds a value; a key
+// holding its zero value (0, "", []) reads as absent, except
+// initial_virtual_users, where 0 is a value.
 func (d *Definition) UsesTestLoad() bool {
 	if d == nil {
 		return false

@@ -45,7 +45,9 @@ v2 and later definitions carry `schema_version` as a `"MAJOR.MINOR"` string.
   (`http.connect_timeout`, `http.tls_handshake_timeout`,
   `http.response_header_timeout`), a [scenario's own
   load](#scenario-load) (a scenario's `load` and `start_at`, and the
-  `constant` and `stages` load types), [preset cookies and
+  `constant` and `stages` load types), [ramp start and graceful
+  stop](#ramp-start-and-graceful-stop) (`initial_virtual_users`,
+  `stop_grace` and `ramp_down_grace`), [preset cookies and
   variables](#cookies-and-variables) (`cookies` at every level, a step's
   `clear_cookies`, `vars`), [JSON data files](#json-data-files)
   (`data_format: "json"`) and [dynamic steps](#dynamic-steps) (a step's
@@ -75,11 +77,15 @@ does not mean module v2.
     of them when every load scenario has its own `load` (see [Scenario
     load](#scenario-load)). Without `duration` each virtual user runs its
     scenario once; a `duration` that is present must be greater than
-    zero, and so must every stage's `duration`;
+    zero, and so must every stage's `duration`; `initial_virtual_users`
+    (0 or more) and `ramp_down_grace` only with `stages`, and
+    `stop_grace` with any model (see [Ramp start and graceful
+    stop](#ramp-start-and-graceful-stop));
   - a scenario's own `load`: a known type with at least one virtual user,
-    a rate of at least 1 or a stage target above 0, no `weight`, not on a
-    `run_once` or `teardown` scenario, and `start_at` (a duration greater
-    than zero) only next to it (see [Scenario load](#scenario-load));
+    a rate of at least 1 or a stage target (or `initial_virtual_users`)
+    above 0, no `weight`, not on a `run_once` or `teardown` scenario, and
+    `start_at` (a duration greater than zero) only next to it (see
+    [Scenario load](#scenario-load));
   - `run_once` and `teardown` not both on one scenario, no `weight` on
     either, at least one load scenario, and no other scenario extracting a
     variable a `run_once` scenario sets (see [Setup and
@@ -133,8 +139,9 @@ does not mean module v2.
 - **v1** is read the way the v1 readers (the CLI, the cloud engine and the
   backend) read it. Unknown keys are ignored, keys match case-insensitively,
   and v2-only keys (`target.base_url`, `thresholds` at every level,
-  `expected_statuses`, `http`, `tls`, `load`, `cookies` and `vars` at
-  every level, a scenario's `run_once`, `teardown`, `load` and
+  `expected_statuses`, `http`, `tls`, `load`, `initial_virtual_users`,
+  `stop_grace`, `ramp_down_grace`, `cookies` and `vars` at every level, a
+  scenario's `run_once`, `teardown`, `load` and
   `start_at`, a step's `checks`,
   `follow_redirects`, `max_redirects`, `once_per_vu`, `discard_body`,
   `response_type`, `clear_cookies`, `skip_if`, `only_if`, `repeat`,
@@ -212,9 +219,10 @@ keys or levels (a step's `max_redirects` against the `follow_redirects`
 in effect for it, `client_cert` and `client_key` together), the PEM
 contents of `client_cert`, `client_key` and `ca_cert`, and blank or
 multi-line file paths. For `load`, at both levels, it also checks that
-durations are greater than zero and that `max_vus` is at least
-`preallocated_vus`, and for a scenario that `start_at` is a duration
-greater than zero. For
+durations are greater than zero and that `max_virtual_users` is at least
+`preallocated_virtual_users`, for a scenario that `start_at` is a
+duration greater than zero, and at both levels that `stop_grace` and
+`ramp_down_grace` are durations of 0 or more. For
 `fields` it also checks that each name appears once (a JSON Schema
 validator reads a repeated key as its last value). For headers, files and
 binary bodies it also checks the `Host` and `Content-Type` rules (header
@@ -260,7 +268,7 @@ for microseconds; Greek capital Mu is rejected because it reads as an ASCII
 | `ttfb`, `ttfb_<agg>` (time to first byte) | duration | as above |
 | `iteration_duration`, `iteration_duration_<agg>` | duration | as above |
 | `error_rate`, `check_rate` | rate | a percentage: `%` required, at most 100% |
-| `requests`, `failed`, `iterations`, `dropped_iterations` | count | a plain whole number |
+| `requests`, `failed`, `iterations`, `dropped_iterations`, `interrupted_iterations` | count | a plain whole number |
 | `rps` | throughput | a plain number (requests per second) |
 | `bytes_sent`, `bytes_received` | size | `b`, `kb` `mb` `gb` (×1000), `kib` `mib` `gib` (×1024), or a plain number of bytes; the value must be a whole number of bytes |
 
@@ -271,9 +279,18 @@ sizes (`dropped_iterations == 0` holds only when nothing was dropped,
 `requests == 1000000000` fails at 1000000001); for durations, rates and
 `rps` it allows for floating point: `|a-b| <= 1e-9 * max(1, |a|, |b|)`.
 
+`interrupted_iterations` counts the iterations cut off when a
+`stop_grace` or `ramp_down_grace` runs out (see [Ramp start and graceful
+stop](#ramp-start-and-graceful-stop)), and only there, not in
+`iterations` or `iteration_duration`. The request such an iteration had
+in flight is not recorded: it counts in neither `requests` nor `failed`,
+so not toward `error_rate`, nor in `duration`, `ttfb` or the byte
+counters.
+
 Scopes: every metric is allowed on the test, a scenario and a step,
 except the iteration metrics (`iteration_duration*`, `iterations`,
-`dropped_iterations`), which are allowed on the test and scenarios only.
+`dropped_iterations`, `interrupted_iterations`), which are allowed on the
+test and scenarios only.
 
 `abort_on_fail` asks the engine to stop the run when the threshold fails.
 `delay_abort` defers that abort: abort checks for the threshold start
@@ -347,9 +364,9 @@ writes a snapshot as JSON and `thresholds.DecodeSnapshot` reads it back:
 ```
 
 - `requests`, `failed`, `bytes_sent` and `bytes_received` are required in
-  every scope. `checks`, `checks_passed`, `iterations` and
-  `dropped_iterations` are left out when not measured, which is not the
-  same as 0.
+  every scope. `checks`, `checks_passed`, `iterations`,
+  `dropped_iterations` and `interrupted_iterations` are left out when not
+  measured, which is not the same as 0.
 - `duration`, `ttfb` and `iteration_duration` are left out when there
   are no values. When present they need `count` (above 0), `sum_us`,
   `min_us` and `max_us`; `hdr` is the scope's HDR histogram as a JSON
@@ -798,8 +815,8 @@ response times. It replaces `virtual_users`, `duration`, `ramp_up` and
   "rate": 500,
   "time_unit": "1s",
   "duration": "5m",
-  "preallocated_vus": 200,
-  "max_vus": 1000
+  "preallocated_virtual_users": 200,
+  "max_virtual_users": 1000
 }
 ```
 
@@ -812,7 +829,7 @@ response times. It replaces `virtual_users`, `duration`, `ramp_up` and
     {"duration": "5m", "target": 600},
     {"duration": "1m", "target": 0}
   ],
-  "preallocated_vus": 50
+  "preallocated_virtual_users": 50
 }
 ```
 
@@ -823,25 +840,28 @@ response times. It replaces `virtual_users`, `duration`, `ramp_up` and
 | `duration` | `rate`, required | How long the test runs, greater than zero. |
 | `stages` | `ramping_rate`, required | At least one `{duration, target}`. The rate starts at 0 and moves linearly to each stage's `target` (0 or more) over that stage's `duration` (greater than zero). At least one `target` must be above 0. |
 | `time_unit` | both | The period `rate` and `target` count over. Default `"1s"`; must be greater than zero. |
-| `preallocated_vus` | both, required | Virtual users started before the test begins, at least 1. |
-| `max_vus` | both | Most virtual users the test may run, at least `preallocated_vus`. `0` or absent means `preallocated_vus`. |
+| `preallocated_virtual_users` | both, required | Virtual users started before the test begins, at least 1. |
+| `max_virtual_users` | both | Most virtual users the test may run, at least `preallocated_virtual_users`. `0` or absent means `preallocated_virtual_users`. |
 
 - `"rate"` takes no `stages`, and `"ramping_rate"` takes no `rate` or
   `duration`; each may still be written with its zero value.
 - An iteration that is due starts on an idle virtual user. When none is
-  idle and fewer than `max_vus` run, a new one starts; otherwise the
-  iteration is dropped and counted.
+  idle and fewer than `max_virtual_users` run, a new one starts;
+  otherwise the iteration is dropped and counted.
 - A `"ramping_rate"` load whose every stage `target` is 0 would start no
   iterations, so `Parse` refuses it at `load`: "never exceeds a rate of 0,
   so the run would do nothing; set a stage target above 0". A negative
   `target` is reported at that stage instead.
 - There is no `start_rate`.
 - `Parse` leaves the defaults to the reader: `time_unit` stays `""` and
-  `max_vus` stays `0`.
+  `max_virtual_users` stays `0`.
 - The test-level `load` takes `"rate"` and `"ramping_rate"` only.
   `"constant"` and `"stages"` are for a [scenario's own
   load](#scenario-load); at the top level `Parse` refuses them at
   `load.type`.
+- The test-level `load` takes no `stop_grace` of its own: the top-level
+  `stop_grace` applies to it, and `Parse` refuses `load.stop_grace` (see
+  [Ramp start and graceful stop](#ramp-start-and-graceful-stop)).
 
 ## Scenario load
 
@@ -873,18 +893,25 @@ this scenario. `start_at` delays its start.
 | `type` | Required | Meaning |
 |---|---|---|
 | `"constant"` | `virtual_users`, `duration` | `virtual_users` (at least 1) run the scenario for `duration` (greater than zero). There is no `ramp_up`; use `"stages"` to ramp. |
-| `"stages"` | `stages` | The number of virtual users starts at 0 and moves linearly to each stage's `target` over that stage's `duration`. At least one `target` must be above 0. |
+| `"stages"` | `stages` | The number of virtual users starts at `initial_virtual_users` (default 1) and moves linearly to each stage's `target` over that stage's `duration`. At least one `target`, or `initial_virtual_users`, must be above 0. |
 | `"rate"`, `"ramping_rate"` | as in [Arrival-rate load](#arrival-rate-load) | The scenario's own arrival rate, with the same keys and rules. |
 
 - Each type takes only its own keys: `"constant"` takes no `rate`,
-  `time_unit`, `stages`, `preallocated_vus` or `max_vus`; `"stages"` no
-  `rate`, `time_unit`, `duration`, `virtual_users`, `preallocated_vus` or
-  `max_vus`; the arrival-rate types no `virtual_users`. Each may still be
-  written with its zero value.
+  `time_unit`, `stages`, `preallocated_virtual_users`,
+  `max_virtual_users`, `initial_virtual_users` or `ramp_down_grace`;
+  `"stages"` no `rate`, `time_unit`, `duration`, `virtual_users`,
+  `preallocated_virtual_users` or `max_virtual_users`; the arrival-rate
+  types no `virtual_users`, `initial_virtual_users` or `ramp_down_grace`.
+  Each may still be written with its zero value, except
+  `initial_virtual_users`, where 0 is a value. Every type takes
+  `stop_grace` (see [Ramp start and graceful
+  stop](#ramp-start-and-graceful-stop)).
 - There is no pool of 0 virtual users: a `"constant"` load needs at
   least 1, and a `"stages"` load whose every `target` is 0 is refused at
-  `load`: "never exceeds 0 virtual users, so the scenario would do
-  nothing; set a stage target above 0".
+  `load`, unless `initial_virtual_users` is above 0: "never exceeds 0
+  virtual users, so the scenario would do nothing; set a stage target or
+  initial_virtual_users above 0". A pool that starts with virtual users
+  may ramp to 0.
 - **`start_at`** is how long after the load starts (after setup) the
   scenario's own load starts, as a duration greater than zero, with no
   upper bound; absent, it starts with the load. The scenario sends
@@ -898,23 +925,94 @@ this scenario. `start_at` delays its start.
 - **Setup and teardown.** A `run_once` or `teardown` scenario takes no
   `load`.
 - **Test-level model.** When every load scenario has its own `load`, the
-  test-level `virtual_users`, `duration`, `ramp_up`, `stages` and `load`
-  are left out, and `Parse` refuses each one that is present: "applies to
-  no scenario: every load scenario has its own load". Otherwise the
+  test-level `virtual_users`, `duration`, `ramp_up`, `stages`, `load`,
+  `initial_virtual_users`, `stop_grace` and `ramp_down_grace` are left
+  out, and `Parse` refuses each one that is present: "applies to no
+  scenario: every load scenario has its own load". Otherwise the
   test-level model is required, as before, and runs the scenarios without
   a `load`. A key holding its zero value (`0`, `""`, `[]`) reads as
-  absent. `Definition.UsesTestLoad` reports whether any load scenario
-  uses the test-level model.
+  absent, except `initial_virtual_users`, where 0 is a value.
+  `Definition.UsesTestLoad` reports whether any load scenario uses the
+  test-level model.
 - **VoltTest Cloud.** On VoltTest Cloud the backend refuses, before the
   run starts, a pool whose peak in a region is below that region's node
-  count, the peak being `virtual_users` for `"constant"`, the highest
-  stage `target` for `"stages"`, and `max_vus` (or `preallocated_vus` when
-  `max_vus` is absent) for `"rate"` and `"ramping_rate"`. `CloudProblems` does not
-  refuse a scenario's `load` or `start_at`; whether VoltTest Cloud runs
-  them is the backend's decision.
+  count, the peak being `virtual_users` for `"constant"`, the larger of
+  `initial_virtual_users` and the highest stage `target` for `"stages"`,
+  and `max_virtual_users` (or `preallocated_virtual_users` when
+  `max_virtual_users` is absent) for `"rate"` and `"ramping_rate"`.
+  `CloudProblems` does not refuse a scenario's `load` or `start_at`;
+  whether VoltTest Cloud runs them is the backend's decision.
 
 A scenario's `load` and `start_at` and the `"constant"` and `"stages"`
 types joined schema_version "2.0" while it is a preview.
+
+## Ramp start and graceful stop
+
+A staged load can start with virtual users already running, and every
+load gives its virtual users time to finish the iteration they are in
+before they stop:
+
+```json
+{
+  "schema_version": "2.0",
+  "name": "Checkout under a spike",
+  "stages": [
+    {"duration": "1m", "target": 50},
+    {"duration": "30s", "target": 10}
+  ],
+  "initial_virtual_users": 10,
+  "ramp_down_grace": "15s",
+  "stop_grace": "1m",
+  "thresholds": ["interrupted_iterations == 0"],
+  "scenarios": [
+    {
+      "name": "Browse",
+      "steps": [{"name": "Home", "request": {"method": "GET", "url": "https://shop.example.com/"}}]
+    },
+    {
+      "name": "Flash sale",
+      "start_at": "30s",
+      "load": {
+        "type": "stages",
+        "initial_virtual_users": 20,
+        "stages": [{"duration": "1m", "target": 0}],
+        "stop_grace": "0s"
+      },
+      "steps": [{"name": "Deal", "request": {"method": "GET", "url": "https://shop.example.com/deal"}}]
+    }
+  ]
+}
+```
+
+| Key | Where | Default | Meaning |
+|---|---|---|---|
+| `initial_virtual_users` | the test level with `stages`, a `"stages"` load | `1` | Virtual users running when the load starts (for a pool, at its `start_at`). The first stage moves linearly from this number to its `target`; `0` ramps from zero. |
+| `ramp_down_grace` | the test level with `stages`, a `"stages"` load | `"30s"` | How long a virtual user removed by a stage that lowers the target may finish its current iteration before it exits. |
+| `stop_grace` | the test level with any model, a scenario's `load` of any type | `"30s"` | How long each virtual user may finish its current iteration once the load ends (its `duration` or last stage). No new iteration starts. |
+
+- A grace is a duration of 0 or more; `"0s"` cuts at once. An iteration
+  still running when its grace runs out is cancelled and counts in
+  `interrupted_iterations` only, not in `iterations` or
+  `iteration_duration` (see [Thresholds](#thresholds)). Its in-flight
+  request is not recorded: it counts in neither `requests` nor `failed`,
+  so not toward `error_rate`, nor in `duration`, `ttfb` or the byte
+  counters.
+- `initial_virtual_users` is not negative. An explicit `0` is a value,
+  kept through `Parse` and `Marshal` (`Definition.InitialVirtualUsers` and
+  `Load.InitialVirtualUsers` are `*int`; nil means the default). An
+  absent grace is `""`. `Parse` leaves the defaults to the reader.
+- `initial_virtual_users` and `ramp_down_grace` need `stages`: at the
+  test level `Parse` refuses them next to `virtual_users` or `load`
+  ("needs stages"), and on a scenario's `load` of another type ("does
+  not apply to type ...").
+- The test-level `stop_grace` applies to the scenarios without their own
+  `load`, whatever the test-level model; without `duration` (each
+  virtual user runs its scenario once) it has no effect. A scenario's
+  own `load` never reads it: each pool has its own `stop_grace`, with
+  the same default.
+- **v1.** These keys are v2 only. A v1 staged load starts at 0 virtual
+  users and stops without a grace, as before; the v1 path drops the keys
+  unread.
 
 ## Cookies and variables
 

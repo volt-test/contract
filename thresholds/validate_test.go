@@ -21,7 +21,7 @@ func TestScopeValidate(t *testing.T) {
 		want  error // nil: valid
 	}{
 		"zero":                      {thresholds.Scope{}, nil},
-		"measured":                  {thresholds.Scope{Requests: 2, Failed: 1, BytesSent: 10, BytesReceived: 20, Checks: ptr(3), ChecksPassed: ptr(3), Iterations: ptr(1), DroppedIterations: ptr(0), Duration: dist(t, 10, 20), TTFB: dist(t, 5)}, nil},
+		"measured":                  {thresholds.Scope{Requests: 2, Failed: 1, BytesSent: 10, BytesReceived: 20, Checks: ptr(3), ChecksPassed: ptr(3), Iterations: ptr(1), DroppedIterations: ptr(0), InterruptedIterations: ptr(0), Duration: dist(t, 10, 20), TTFB: dist(t, 5)}, nil},
 		"empty histograms":          {thresholds.Scope{Duration: thresholds.Distribution{Hist: thresholds.NewHistogram()}, IterationDuration: thresholds.Distribution{Hist: thresholds.NewHistogram()}}, nil},
 		"values left out of hist":   {thresholds.Scope{Requests: 2, Duration: thresholds.Distribution{Count: 2, SumUs: 30, MinUs: 10, MaxUs: 20, Hist: dist(t, 10).Hist}}, nil},
 		"values without hist":       {thresholds.Scope{Requests: 1, Duration: thresholds.Distribution{Count: 1, SumUs: 5, MinUs: 5, MaxUs: 5}}, nil},
@@ -34,6 +34,7 @@ func TestScopeValidate(t *testing.T) {
 		"negative bytes":            {thresholds.Scope{BytesReceived: -1}, thresholds.ErrInvalidScope},
 		"negative optional":         {thresholds.Scope{Checks: ptr(-1)}, thresholds.ErrInvalidScope},
 		"negative dropped":          {thresholds.Scope{DroppedIterations: ptr(-1)}, thresholds.ErrInvalidScope},
+		"negative interrupted":      {thresholds.Scope{InterruptedIterations: ptr(-1)}, thresholds.ErrInvalidScope},
 		"negative count":            {thresholds.Scope{Duration: thresholds.Distribution{Count: -1}}, thresholds.ErrInvalidScope},
 		"negative sum":              {thresholds.Scope{TTFB: thresholds.Distribution{SumUs: -1}}, thresholds.ErrInvalidScope},
 		"negative min":              {thresholds.Scope{TTFB: thresholds.Distribution{Count: 1, MinUs: -1, MaxUs: 1}}, thresholds.ErrInvalidScope},

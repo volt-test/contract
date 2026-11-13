@@ -26,7 +26,7 @@ type Distribution struct {
 type Scope struct {
 	Requests, Failed, BytesSent, BytesReceived int64
 
-	Checks, ChecksPassed, Iterations, DroppedIterations *int64
+	Checks, ChecksPassed, Iterations, DroppedIterations, InterruptedIterations *int64
 
 	Duration, TTFB, IterationDuration Distribution
 }
@@ -100,6 +100,7 @@ func (s *Scope) Add(o *Scope) error {
 	r.ChecksPassed = opt(s.ChecksPassed, o.ChecksPassed)
 	r.Iterations = opt(s.Iterations, o.Iterations)
 	r.DroppedIterations = opt(s.DroppedIterations, o.DroppedIterations)
+	r.InterruptedIterations = opt(s.InterruptedIterations, o.InterruptedIterations)
 	r.Duration = addDistribution(s.Duration, o.Duration, add)
 	r.TTFB = addDistribution(s.TTFB, o.TTFB, add)
 	r.IterationDuration = addDistribution(s.IterationDuration, o.IterationDuration, add)
@@ -190,7 +191,7 @@ func (s *Scope) check() error {
 			return fmt.Errorf("%w: negative counter", ErrInvalidScope)
 		}
 	}
-	for _, p := range []*int64{s.Checks, s.ChecksPassed, s.Iterations, s.DroppedIterations} {
+	for _, p := range []*int64{s.Checks, s.ChecksPassed, s.Iterations, s.DroppedIterations, s.InterruptedIterations} {
 		if p != nil && *p < 0 {
 			return fmt.Errorf("%w: negative counter", ErrInvalidScope)
 		}
@@ -249,6 +250,7 @@ func (s *Scope) Clone() *Scope {
 	}
 	c.Checks, c.ChecksPassed = cp(s.Checks), cp(s.ChecksPassed)
 	c.Iterations, c.DroppedIterations = cp(s.Iterations), cp(s.DroppedIterations)
+	c.InterruptedIterations = cp(s.InterruptedIterations)
 	c.Duration.Hist = cloneHist(histOf(s.Duration))
 	c.TTFB.Hist = cloneHist(histOf(s.TTFB))
 	c.IterationDuration.Hist = cloneHist(histOf(s.IterationDuration))

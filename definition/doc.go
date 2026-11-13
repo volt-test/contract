@@ -17,7 +17,8 @@
 // way the v1 readers read it: unknown keys are ignored, keys match
 // case-insensitively, and v2-only keys (contract:"v2", such as
 // target.base_url, thresholds, expected_statuses, http, tls, load,
-// cookies and vars at every level, a scenario's run_once, teardown, load
+// initial_virtual_users, stop_grace, ramp_down_grace, cookies and vars at
+// every level, a scenario's run_once, teardown, load
 // and start_at, a step's checks, follow_redirects, max_redirects,
 // once_per_vu, discard_body, response_type, clear_cookies, skip_if,
 // only_if, repeat, foreach and steps, a request's
@@ -262,30 +263,49 @@
 // zero, and so must every stage duration. When every load scenario has its
 // own Load, there is no test-level model (UsesTestLoad is false), and
 // Parse refuses each of those keys that holds a value other than its zero
-// value.
+// value, initial_virtual_users, ramp_down_grace and stop_grace included.
+//
+// Staged load starts at InitialVirtualUsers, a *int so that an explicit 0
+// stays apart from absent (nil means the default, 1), and a stage that
+// lowers the target gives each virtual user it removes RampDownGrace
+// (default "30s") to finish its iteration; both need stages. StopGrace
+// (default "30s") is how long each virtual user may finish its iteration
+// once the test-level model ends, with any model. A grace of "0s" cuts at once; an
+// iteration still running when a grace runs out is cancelled and counted
+// in the interrupted_iterations threshold metric. In v1 a staged load
+// starts at 0 virtual users and stops without a grace.
 //
 // Load is an arrival-rate (open) model. Type LoadRate needs rate and
 // duration; LoadRampingRate needs stages, at least one with a target above
 // 0, and takes neither. Rates count iterations per time_unit; "" means 1s.
-// preallocated_vus is required, and max_vus 0 means preallocated_vus. Parse
-// leaves both defaults to the reader. load joined schema_version "2.0"
-// while it is a preview. The test-level load takes these two types only.
+// preallocated_virtual_users is required, and max_virtual_users 0 means
+// preallocated_virtual_users. Parse leaves these defaults, and those of
+// initial_virtual_users and the graces, to the reader. load joined
+// schema_version "2.0" while it is a preview. The test-level load takes
+// these two types only, and no stop_grace of its own: the top-level
+// stop_grace applies to it.
 //
 // # Scenario load (v2)
 //
 // A Scenario with a Load runs its own pool alongside the test-level model,
 // independent of it, and is never picked by weight. Its Load takes the
 // arrival-rate types, LoadConstant (virtual_users of at least 1 and
-// duration) or LoadStages (stages, at least one with a target above 0);
-// there is no pool of 0 virtual users. StartAt delays the pool's start
-// from the start of the load and needs a Load. Parse refuses a Load on a
-// run_once or teardown scenario and a weight next to a Load. On VoltTest
-// Cloud the backend refuses, before the run starts, a pool whose peak in a
-// region is below that region's node count, the peak being virtual_users
-// for LoadConstant, the highest stage target for LoadStages, and max_vus
-// (or preallocated_vus when max_vus is absent) for LoadRate and
-// LoadRampingRate. CloudProblems does not refuse pools. A scenario's load
-// and start_at joined schema_version "2.0" while it is a preview.
+// duration) or LoadStages (stages, at least one with a target or
+// initial_virtual_users above 0); there is no pool of 0 virtual users.
+// LoadStages alone takes initial_virtual_users and ramp_down_grace, with
+// the defaults of the test level. Every type takes stop_grace (default
+// "30s"), which applies when the pool's duration or last stage ends; the
+// test-level stop_grace never applies to a pool. StartAt delays the
+// pool's start from the start of the load and needs a Load. Parse refuses
+// a Load on a run_once or teardown scenario and a weight next to a Load.
+// On VoltTest Cloud the backend refuses, before the run starts, a pool
+// whose peak in a region is below that region's node count, the peak
+// being virtual_users for LoadConstant, the larger of
+// initial_virtual_users and the highest stage target for LoadStages, and
+// max_virtual_users (or preallocated_virtual_users when max_virtual_users
+// is absent) for LoadRate and LoadRampingRate. CloudProblems does not
+// refuse pools. A scenario's load and start_at joined schema_version
+// "2.0" while it is a preview.
 //
 // # Cookies and variables (v2)
 //

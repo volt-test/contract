@@ -69,7 +69,8 @@ func equalScopes(a, b *thresholds.Scope) bool {
 	if a.Requests != b.Requests || a.Failed != b.Failed || a.BytesSent != b.BytesSent || a.BytesReceived != b.BytesReceived {
 		return false
 	}
-	for _, p := range [][2]*int64{{a.Checks, b.Checks}, {a.ChecksPassed, b.ChecksPassed}, {a.Iterations, b.Iterations}, {a.DroppedIterations, b.DroppedIterations}} {
+	for _, p := range [][2]*int64{{a.Checks, b.Checks}, {a.ChecksPassed, b.ChecksPassed}, {a.Iterations, b.Iterations}, {a.DroppedIterations, b.DroppedIterations},
+		{a.InterruptedIterations, b.InterruptedIterations}} {
 		if (p[0] == nil) != (p[1] == nil) || (p[0] != nil && *p[0] != *p[1]) {
 			return false
 		}
@@ -194,10 +195,10 @@ func TestNewHistogram(t *testing.T) {
 
 func TestScopeAdd(t *testing.T) {
 	a := thresholds.Scope{Requests: 10, Failed: 1, BytesSent: 100, BytesReceived: 1000,
-		Checks: ptr(4), ChecksPassed: ptr(3), Iterations: ptr(2), DroppedIterations: nil,
+		Checks: ptr(4), ChecksPassed: ptr(3), Iterations: ptr(2), DroppedIterations: nil, InterruptedIterations: ptr(4),
 		Duration: dist(t, 5000, 7000), TTFB: thresholds.Distribution{Count: 2, SumUs: 30, MinUs: 10, MaxUs: 20}}
 	b := thresholds.Scope{Requests: 5, Failed: 2, BytesSent: 50, BytesReceived: 500,
-		Checks: ptr(6), ChecksPassed: ptr(6), Iterations: ptr(1), DroppedIterations: ptr(0),
+		Checks: ptr(6), ChecksPassed: ptr(6), Iterations: ptr(1), DroppedIterations: ptr(0), InterruptedIterations: ptr(5),
 		Duration: dist(t, 1000, 9000), TTFB: dist(t, 15)}
 	bCopy := b.Clone()
 
@@ -211,6 +212,9 @@ func TestScopeAdd(t *testing.T) {
 	if *sum.Checks != 10 || *sum.ChecksPassed != 9 || *sum.Iterations != 3 || sum.DroppedIterations != nil {
 		t.Errorf("optional counters %v %v %v %v", sum.Checks, sum.ChecksPassed, sum.Iterations, sum.DroppedIterations)
 	}
+	if sum.InterruptedIterations == nil || *sum.InterruptedIterations != 9 {
+		t.Errorf("interrupted_iterations %v, want 9", sum.InterruptedIterations)
+	}
 	if d := sum.Duration; d.Count != 4 || d.SumUs != 22000 || d.MinUs != 1000 || d.MaxUs != 9000 || d.Hist.TotalCount() != 4 {
 		t.Errorf("duration %+v", d)
 	}
@@ -222,8 +226,11 @@ func TestScopeAdd(t *testing.T) {
 	if !equalScopes(&b, bCopy) {
 		t.Error("Add modified its argument")
 	}
-	if sum.Checks == a.Checks || sum.Checks == b.Checks {
+	if sum.Checks == a.Checks || sum.Checks == b.Checks || sum.InterruptedIterations == a.InterruptedIterations {
 		t.Error("Add shares a counter pointer")
+	}
+	if c := b.Clone(); c.InterruptedIterations == b.InterruptedIterations || *c.InterruptedIterations != 5 {
+		t.Error("Clone shares or loses interrupted_iterations")
 	}
 
 	// A zero Scope has nil optional counters, so they stay nil.
@@ -231,7 +238,7 @@ func TestScopeAdd(t *testing.T) {
 	if err := zero.Add(&b); err != nil {
 		t.Fatal(err)
 	}
-	if zero.Checks != nil || zero.Requests != 5 || zero.Duration.Count != 2 || zero.Duration.Hist.TotalCount() != 2 {
+	if zero.Checks != nil || zero.InterruptedIterations != nil || zero.Requests != 5 || zero.Duration.Count != 2 || zero.Duration.Hist.TotalCount() != 2 {
 		t.Errorf("zero.Add = %+v", zero)
 	}
 	if zero.Duration.Hist == b.Duration.Hist {
@@ -617,6 +624,7 @@ func (r *reader) scope(t *testing.T) thresholds.Scope {
 		return nil
 	}
 	s.Checks, s.ChecksPassed, s.Iterations, s.DroppedIterations = opt(), opt(), opt(), opt()
+	s.InterruptedIterations = opt()
 	if s.Checks != nil && s.ChecksPassed != nil && *s.ChecksPassed > *s.Checks {
 		s.ChecksPassed = ptr(*s.Checks)
 	}

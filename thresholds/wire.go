@@ -67,10 +67,11 @@ type wireScopeOut struct {
 	BytesSent     int64 `json:"bytes_sent"`
 	BytesReceived int64 `json:"bytes_received"`
 
-	Checks            *int64 `json:"checks,omitempty"`
-	ChecksPassed      *int64 `json:"checks_passed,omitempty"`
-	Iterations        *int64 `json:"iterations,omitempty"`
-	DroppedIterations *int64 `json:"dropped_iterations,omitempty"`
+	Checks                *int64 `json:"checks,omitempty"`
+	ChecksPassed          *int64 `json:"checks_passed,omitempty"`
+	Iterations            *int64 `json:"iterations,omitempty"`
+	DroppedIterations     *int64 `json:"dropped_iterations,omitempty"`
+	InterruptedIterations *int64 `json:"interrupted_iterations,omitempty"`
 
 	Duration          *wireDistOut `json:"duration,omitempty"`
 	TTFB              *wireDistOut `json:"ttfb,omitempty"`
@@ -192,10 +193,11 @@ type wireScopeIn struct {
 	BytesSent     wireInt `json:"bytes_sent"`
 	BytesReceived wireInt `json:"bytes_received"`
 
-	Checks            wireInt `json:"checks"`
-	ChecksPassed      wireInt `json:"checks_passed"`
-	Iterations        wireInt `json:"iterations"`
-	DroppedIterations wireInt `json:"dropped_iterations"`
+	Checks                wireInt `json:"checks"`
+	ChecksPassed          wireInt `json:"checks_passed"`
+	Iterations            wireInt `json:"iterations"`
+	DroppedIterations     wireInt `json:"dropped_iterations"`
+	InterruptedIterations wireInt `json:"interrupted_iterations"`
 
 	Duration          *wireDistIn `json:"duration"`
 	TTFB              *wireDistIn `json:"ttfb"`
@@ -275,6 +277,7 @@ func encodeScope(sc *Scope, at place) (*wireScopeOut, error) {
 	w := &wireScopeOut{
 		Requests: sc.Requests, Failed: sc.Failed, BytesSent: sc.BytesSent, BytesReceived: sc.BytesReceived,
 		Checks: sc.Checks, ChecksPassed: sc.ChecksPassed, Iterations: sc.Iterations, DroppedIterations: sc.DroppedIterations,
+		InterruptedIterations: sc.InterruptedIterations,
 	}
 	var err error
 	if w.Duration, err = encodeDist(sc.Duration, at, "duration"); err != nil {
@@ -576,7 +579,7 @@ const (
 var memberKeys = [...][]string{
 	keysTop: {"start", "end", "responses", "test", "scenarios"},
 	keysScope: {"requests", "failed", "bytes_sent", "bytes_received",
-		"checks", "checks_passed", "iterations", "dropped_iterations",
+		"checks", "checks_passed", "iterations", "dropped_iterations", "interrupted_iterations",
 		"duration", "ttfb", "iteration_duration", "steps"},
 	keysDist: {"count", "sum_us", "min_us", "max_us", "hdr"},
 }
@@ -796,6 +799,7 @@ func (d *snapshotDecoder) scope(dst *Scope, w *wireScopeIn, at place) error {
 	}
 	dst.Checks, dst.ChecksPassed = optional(w.Checks), optional(w.ChecksPassed)
 	dst.Iterations, dst.DroppedIterations = optional(w.Iterations), optional(w.DroppedIterations)
+	dst.InterruptedIterations = optional(w.InterruptedIterations)
 	if err := d.dist(&dst.Duration, w.Duration, at, "duration"); err != nil {
 		return err
 	}

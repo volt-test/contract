@@ -12,7 +12,7 @@ import (
 func FuzzParse(f *testing.F) {
 	for _, s := range []string{
 		"", " ", "p95 < 500ms", "p99<=1s", "p99.9 > 0.5us", "ttfb_p99.9 == 1µs", "iteration_duration >= 2m",
-		"error_rate < 0.07%", "check_rate > 99.99%", "requests > 1000", "dropped_iterations == 0",
+		"error_rate < 0.07%", "check_rate > 99.99%", "requests > 1000", "dropped_iterations == 0", "interrupted_iterations == 0",
 		"rps > 0.25", "bytes_sent < 50kb", "bytes_received < 1.5GiB", "p95 = 5ms", "p95 != 5ms",
 		"p95 < -1s", "p95 < .5s", "p95 < 1e3ms", "p95 < 500", "error_rate < 5", "p95 < 5ms x",
 		"p95 < 500 ms", "P95 < 5MS", "ttfb_p42 < 1s", "p99.99 < 1s", "error_rate < 101%",

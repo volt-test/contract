@@ -18,8 +18,8 @@
         "target": 0
       }
     ],
-    "preallocated_vus": 50,
-    "max_vus": 400
+    "preallocated_virtual_users": 50,
+    "max_virtual_users": 400
   },
   "scenarios": [
     {
