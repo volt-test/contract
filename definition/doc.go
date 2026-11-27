@@ -425,8 +425,10 @@
 //
 // CloudProblems lists what VoltTest Cloud refuses in a definition Parse
 // accepts, for a run on a given number of nodes: tls file paths, binary
-// request content (files and body_base64), ${env.*} references (cookie
-// and var values included), and run_once and teardown scenarios, in that
-// order. It returns nil for v1. The README section "VoltTest Cloud" gives the paths
-// and messages.
+// request content (files and body_base64), and run_once and teardown
+// scenarios, in that order. ${env.*} references are not refused there: a
+// cloud run supplies their values, and MissingEnvProblems reports the
+// references it has no value for (cookie and var values included), from
+// the names it is given. Both return nil for v1. The README section
+// "VoltTest Cloud" gives the paths and messages.
 package definition

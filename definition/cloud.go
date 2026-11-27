@@ -10,9 +10,9 @@ import (
 
 const (
 	cloudPathMessage   = "must be inline PEM on VoltTest Cloud (a file path cannot be read on a cloud node)"
-	cloudEnvMessage    = " is not available on VoltTest Cloud"
 	cloudSetupMessage  = " scenarios are not supported on VoltTest Cloud yet; run them with the headless engine"
 	cloudBinaryMessage = "is not available on VoltTest Cloud yet; run this test headless"
+	missingEnvMessage  = " has no value; supply it in the run's env"
 )
 
 // CloudProblems reports what VoltTest Cloud refuses in a parsed v2
@@ -24,15 +24,11 @@ const (
 //     included, at their own paths): the request body_base64, then each
 //     multipart file's path or content_base64, by field name. Cloud
 //     nodes cannot receive file content yet;
-//   - each distinct ${env.*} reference at each path where it is written:
-//     target.base_url, each test-level cookie and then var (each sorted by
-//     name), then per scenario its cookies and vars, and per leaf step the
-//     request url, body, each body_json string value, each fields value,
-//     each multipart file's filename (by field name), each header (sorted
-//     by name) and the step's cookies.
-//     Keys, field names and cookie and var names are not scanned, and
-//     neither are ${expr: ...} bodies (see ScanTemplate);
 //   - each run_once and each teardown scenario.
+//
+// ${env.*} references are not refused here: a cloud run supplies their
+// values. MissingEnvProblems reports the ones it has no value for, so
+// call both.
 //
 // A scenario's own load and start_at are not refused here. No current
 // refusal depends on nodes; it is kept for callers.
@@ -73,7 +69,6 @@ func CloudProblems(d *Definition, nodes int) []Problem {
 			}
 		})
 	}
-	forEachTemplate(d, func(path, src string) { ps = appendEnvRefs(ps, path, src) })
 	for i, sc := range d.Scenarios {
 		sp := indexPath("scenarios", i)
 		if sc.RunOnce {
@@ -86,8 +81,37 @@ func CloudProblems(d *Definition, nodes int) []Problem {
 	return ps
 }
 
+// MissingEnvProblems reports each distinct ${env.*} reference of a parsed
+// v2 definition whose name is not in have, at each path where it is
+// written: target.base_url, each test-level cookie and then var (each
+// sorted by name), then per scenario its cookies and vars, and per leaf
+// step (steps inside step groups included, at their own paths) the request
+// url, body, each body_json string value, each fields value, each
+// multipart file's filename (by field name), each header (sorted by name)
+// and the step's cookies. Keys, field names and cookie and var names are
+// not scanned, and neither are ${expr: ...} bodies (see ScanTemplate): an
+// expression cannot read the environment. Conditions, checks and
+// extractors hold literal text, so they are not scanned either.
+//
+// have holds names, never values: a reference's name is the text after
+// "env." up to its first filter "|", and a name whose entry is missing or
+// false has no value, so a nil have reports every reference. A reference
+// is reported as written, filters included, once per path. Pair it with
+// CloudProblems, which does not refuse ${env.*}.
+//
+// It returns nil for a nil or v1 definition. The result is not capped;
+// callers that build a ValidationError bound it.
+func MissingEnvProblems(d *Definition, have map[string]bool) []Problem {
+	if d == nil || d.IsV1() {
+		return nil
+	}
+	var ps []Problem
+	forEachTemplate(d, func(path, src string) { ps = appendEnvRefs(ps, path, src, have) })
+	return ps
+}
+
 // forEachTemplate calls fn with each template value of d and its path, in
-// the order CloudProblems lists ${env.*} references.
+// the order MissingEnvProblems lists ${env.*} references.
 func forEachTemplate(d *Definition, fn func(path, src string)) {
 	if d.Target != nil {
 		fn("target.base_url", d.Target.BaseURL)
@@ -137,19 +161,29 @@ func forEachMapValue(p string, m map[string]string, fn func(path, src string)) {
 }
 
 // appendEnvRefs appends a problem at path for each distinct ${env.*}
-// reference in src, as written and in source order. ${expr: ...} bodies
-// are not scanned; after an expression ScanTemplate cannot read, the rest
-// of src is not scanned either.
-func appendEnvRefs(ps []Problem, path, src string) []Problem {
+// reference in src whose name have does not hold, as written and in source
+// order. ${expr: ...} bodies are not scanned; after an expression
+// ScanTemplate cannot read, the rest of src is not scanned either.
+func appendEnvRefs(ps []Problem, path, src string, have map[string]bool) []Problem {
 	var seen map[string]bool
 	_ = scanTemplate(src, func(r TemplateRef) {
-		if ref := src[r.Start:r.End]; !r.Expr && strings.HasPrefix(ref[2:], "env.") && !seen[ref] {
-			if seen == nil {
-				seen = map[string]bool{}
-			}
-			seen[ref] = true
-			ps = append(ps, Problem{Path: path, Message: ref + cloudEnvMessage})
+		ref := src[r.Start:r.End]
+		if r.Expr || seen[ref] {
+			return
 		}
+		name, isEnv := strings.CutPrefix(r.Body(src), "env.")
+		if !isEnv {
+			return
+		}
+		if seen == nil {
+			seen = map[string]bool{}
+		}
+		seen[ref] = true
+		// The name ends at the first filter, as the engine splits it.
+		if base, _, _ := strings.Cut(name, "|"); have[base] {
+			return
+		}
+		ps = append(ps, Problem{Path: path, Message: ref + missingEnvMessage})
 	})
 	return ps
 }

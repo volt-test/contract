@@ -1500,16 +1500,19 @@ Dynamic steps joined schema_version "2.0" while it is a preview.
 
 A definition that `Parse` accepts can still be refused by VoltTest Cloud.
 `definition.CloudProblems(def, nodes)` lists the refusals for a run on
-`nodes` nodes, so every reader refuses the same things with the same
-paths and messages:
+`nodes` nodes, and `definition.MissingEnvProblems(def, have)` the
+`${env.NAME}` references the run supplies no value for, so every reader
+refuses the same things with the same paths and messages:
 
 ```go
-if ps := definition.CloudProblems(def, nodes); len(ps) > 0 {
+ps := definition.CloudProblems(def, nodes)
+ps = append(ps, definition.MissingEnvProblems(def, have)...)
+if len(ps) > 0 {
 	return &definition.ValidationError{Problems: ps}
 }
 ```
 
-It reports, in this order:
+`CloudProblems` reports, in this order:
 
 1. **File paths in `tls`.** A `client_cert`, `client_key` or `ca_cert`
    that is not inline PEM (`IsInlinePEM`): a cloud node cannot read a
@@ -1520,34 +1523,42 @@ It reports, in this order:
    headless". VoltTest Cloud cannot ship file content to its nodes yet,
    and a path names a file that is not on the node. A multipart body with
    `fields` only is allowed.
-3. **`${env.NAME}` references.** A cloud node's environment holds its own
-   settings, not yours. Each distinct reference is reported as written,
-   filters included, at each path where it appears: `target.base_url`,
-   each test-level `cookies` value and then each `vars` value (each by
-   sorted name), then for each scenario its `cookies` and `vars` values,
-   and for each of its steps the request `url`, `body`, every string value in
-   `body_json`, every value in `fields`, each multipart file's
-   `filename` by field name, every header value, by sorted
-   name (`headers.X-A` for one value, `headers.X-A[1]` for the second of
-   several), and the step's `cookies` values.
-   A reference runs from `${` to the first `}`; an unterminated `${env.X`
-   is literal. A `${expr: ...}` expression is not scanned: expressions
-   cannot read environment variables (see [Templates](#templates)). Keys
-   in `body_json`, names in `fields` and cookie and variable names are
-   not refused.
-   Steps inside a [step group](#step-groups) are scanned at their own
-   paths, such as `scenarios[0].steps[2].steps[0].request.url`, here and
-   for binary content.
-4. **Setup and teardown.** Each `run_once` and each `teardown` scenario,
+3. **Setup and teardown.** Each `run_once` and each `teardown` scenario,
    at that flag.
 
 No current refusal depends on `nodes`; it is kept for callers. A
 scenario's own `load` and `start_at` are not refused here (see [Scenario
-load](#scenario-load)).
+load](#scenario-load)). `${env.NAME}` is not refused either: a cloud run
+carries the values with it.
+
+`MissingEnvProblems(def, have)` reports the references the run has no
+value for: "`${env.API_TOKEN}` has no value; supply it in the run's env".
+`have` holds **names**, never values — a reference's name is the text
+after `env.` up to its first filter `|`, and a name whose entry is
+missing or `false` has no value, so a `nil` `have` reports every
+reference. Each distinct reference is reported as written, filters
+included, at each path where it appears: `target.base_url`, each
+test-level `cookies` value and then each `vars` value (each by sorted
+name), then for each scenario its `cookies` and `vars` values, and for
+each of its steps the request `url`, `body`, every string value in
+`body_json`, every value in `fields`, each multipart file's `filename` by
+field name, every header value, by sorted name (`headers.X-A` for one
+value, `headers.X-A[1]` for the second of several), and the step's
+`cookies` values.
+A reference runs from `${` to the first `}`; an unterminated `${env.X`
+is literal. A `${expr: ...}` expression is not scanned: expressions
+cannot read environment variables (see [Templates](#templates)). Keys in
+`body_json`, names in `fields`, cookie and variable names, and the
+`skip_if`, `only_if`, `checks` and `extract` of a step, which are
+literal, are not scanned.
+
+Steps inside a [step group](#step-groups) are scanned at their own paths,
+such as `scenarios[0].steps[2].steps[0].request.url`, for binary content
+and for `${env.NAME}` alike.
 
 Paths name keys the way `Parse` does: `headers.Accept`, or
 `headers["X Y"]` for a key that is not letters, digits, `_` and `-`, cut
-to about 128 bytes. It returns nil for a v1 definition. The list is not
+to about 128 bytes. Both return nil for a v1 definition. The list is not
 capped; `ValidationError.Error` shows the first 100. Thresholds are not
 part of it: whether a metric is measured depends on the engine release
 that runs the test.

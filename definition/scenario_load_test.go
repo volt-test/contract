@@ -462,10 +462,10 @@ func TestAutoHandleCookiesExplicit(t *testing.T) {
 	}
 }
 
-// TestCloudProblemsCookiesVars checks that ${env.*} references in cookie
-// and var values are refused at each level, in the documented order, and
-// that a scenario's own load and start_at are not refused.
-func TestCloudProblemsCookiesVars(t *testing.T) {
+// TestMissingEnvProblemsCookiesVars checks that ${env.*} references in
+// cookie and var values are reported at each level, in the documented
+// order, and that a scenario's own load and start_at are not refused.
+func TestMissingEnvProblemsCookiesVars(t *testing.T) {
 	data := []byte(`{"schema_version": "2.0", "name": "cloud",
 		"cookies": {"b": "${env.B}", "a": "x${env.A}${env.A}"},
 		"vars": {"v": "${env.V}", "w": "${uuid}"},
@@ -476,20 +476,23 @@ func TestCloudProblemsCookiesVars(t *testing.T) {
 				"request": {"method": "GET", "url": "/a", "headers": {"H": "${env.H}"}}}]},
 			{"name": "t", "load": {"type": "stages", "stages": [{"duration": "1m", "target": 1}]}, "vars": {"y": "${env.Y}"},
 			"steps": [{"name": "b", "request": {"method": "GET", "url": "/b"}}]}]}`)
-	wantCloudProblems(t, data, 3, []definition.Problem{
-		cloudEnv("target.base_url", "${env.T}"),
-		cloudEnv("cookies.a", "${env.A}"),
-		cloudEnv("cookies.b", "${env.B}"),
-		cloudEnv("vars.v", "${env.V}"),
-		cloudEnv("scenarios[0].cookies.c", "${env.C}"),
-		cloudEnv("scenarios[0].vars.x", "${env.X}"),
-		cloudEnv("scenarios[0].steps[0].request.headers.H", "${env.H}"),
-		cloudEnv("scenarios[0].steps[0].cookies.s", "${env.S}"),
-		cloudEnv("scenarios[1].vars.y", "${env.Y}"),
+	wantMissingEnv(t, data, nil, []definition.Problem{
+		missingEnv("target.base_url", "${env.T}"),
+		missingEnv("cookies.a", "${env.A}"),
+		missingEnv("cookies.b", "${env.B}"),
+		missingEnv("vars.v", "${env.V}"),
+		missingEnv("scenarios[0].cookies.c", "${env.C}"),
+		missingEnv("scenarios[0].vars.x", "${env.X}"),
+		missingEnv("scenarios[0].steps[0].request.headers.H", "${env.H}"),
+		missingEnv("scenarios[0].steps[0].cookies.s", "${env.S}"),
+		missingEnv("scenarios[1].vars.y", "${env.Y}"),
 	})
 	pools := mustParse(t, readFile(t, "../testdata/v2/valid/scenario_load.json"))
 	if ps := definition.CloudProblems(pools, 4); ps != nil {
 		t.Errorf("CloudProblems(scenario_load.json) = %v, want none", ps)
+	}
+	if ps := definition.MissingEnvProblems(pools, nil); ps != nil {
+		t.Errorf("MissingEnvProblems(scenario_load.json) = %v, want none", ps)
 	}
 }
 
