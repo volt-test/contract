@@ -1040,6 +1040,9 @@ func TestV1DropsDynamicStepKeys(t *testing.T) {
 		if CloudProblems(got, 1) != nil {
 			t.Errorf("%s: CloudProblems scans a v1 definition", name)
 		}
+		if MissingEnvProblems(got, nil) != nil {
+			t.Errorf("%s: MissingEnvProblems scans a v1 definition", name)
+		}
 	}
 }
 

@@ -1,0 +1,28 @@
+{
+  "schema_version": "2.0",
+  "name": "Env references that stay literal",
+  "virtual_users": 1,
+  "duration": "30s",
+  "target": {
+    "base_url": "https://shop.example.com"
+  },
+  "scenarios": [
+    {
+      "name": "Shop",
+      "steps": [
+        {
+          "name": "Products",
+          "skip_if": "region == \"${env.REGION}\"",
+          "request": {
+            "method": "GET",
+            "url": "/api/products"
+          },
+          "checks": [
+            { "name": "region", "type": "json", "selector": "$.region", "equals": "${env.REGION}" },
+            { "name": "tier", "type": "header", "selector": "X-Tier", "equals": "${env.TIER}" }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -379,8 +379,8 @@ func TestDynamicWalkersRecurse(t *testing.T) {
 	})
 }
 
-// TestDynamicPublicWalkers checks CloudProblems, JSONSelectorProblems and
-// Bounds on the steps inside a step group.
+// TestDynamicPublicWalkers checks CloudProblems, MissingEnvProblems,
+// JSONSelectorProblems and Bounds on the steps inside a step group.
 func TestDynamicPublicWalkers(t *testing.T) {
 	d := mustParse(t, []byte(`{"schema_version":"2.0","name":"x","virtual_users":1,"scenarios":[{"name":"a","steps":[`+
 		`{"name":"first",`+get+`},`+
@@ -392,12 +392,17 @@ func TestDynamicPublicWalkers(t *testing.T) {
 	want := []definition.Problem{
 		{Path: "scenarios[0].steps[1].steps[0].request.files.doc.path", Message: "is not available on VoltTest Cloud yet; run this test headless"},
 		{Path: "scenarios[0].steps[1].steps[1].request.body_base64", Message: "is not available on VoltTest Cloud yet; run this test headless"},
-		cloudEnv("scenarios[0].steps[1].steps[0].request.url", "${env.A}"),
-		cloudEnv("scenarios[0].steps[1].steps[0].request.files.doc.filename", "${env.C}"),
-		cloudEnv("scenarios[0].steps[1].steps[0].cookies.c", "${env.D}"),
 	}
 	if got := definition.CloudProblems(d, 1); !reflect.DeepEqual(got, want) {
 		t.Errorf("CloudProblems =\n%s\nwant\n%s", cloudProblemLines(got), cloudProblemLines(want))
+	}
+	wantEnv := []definition.Problem{
+		missingEnv("scenarios[0].steps[1].steps[0].request.url", "${env.A}"),
+		missingEnv("scenarios[0].steps[1].steps[0].request.files.doc.filename", "${env.C}"),
+		missingEnv("scenarios[0].steps[1].steps[0].cookies.c", "${env.D}"),
+	}
+	if got := definition.MissingEnvProblems(d, nil); !reflect.DeepEqual(got, wantEnv) {
+		t.Errorf("MissingEnvProblems =\n%s\nwant\n%s", cloudProblemLines(got), cloudProblemLines(wantEnv))
 	}
 	sel := definition.JSONSelectorProblems(d)
 	if len(sel) != 1 || sel[0].Path != "scenarios[0].steps[1].steps[0].extract[0].selector" {
@@ -620,10 +625,10 @@ func TestTemplateScanOldVsNew(t *testing.T) {
 	}
 	// The first-} rule reads "${a${env.B}" as one reference, which is not
 	// an env reference, so only ${env.C} is flagged.
-	wantCloudProblems(t, cloudStepsDoc(`{}`, `{"name":"a","request":{"method":"GET","url":"https://x/${a${env.B}}${env.C}"}}`), 1,
-		[]definition.Problem{cloudEnv("scenarios[0].steps[0].request.url", "${env.C}")})
+	wantMissingEnv(t, cloudStepsDoc(`{}`, `{"name":"a","request":{"method":"GET","url":"https://x/${a${env.B}}${env.C}"}}`), nil,
+		[]definition.Problem{missingEnv("scenarios[0].steps[0].request.url", "${env.C}")})
 	// An expression body is not scanned for ${env.*}.
-	wantCloudProblems(t, cloudStepsDoc(`{}`, `{"name":"a","request":{"method":"GET",`+
-		`"url":"https://x/${expr: {\"a\": 1} + ${env.B}}${env.C}"}}`), 1,
-		[]definition.Problem{cloudEnv("scenarios[0].steps[0].request.url", "${env.C}")})
+	wantMissingEnv(t, cloudStepsDoc(`{}`, `{"name":"a","request":{"method":"GET",`+
+		`"url":"https://x/${expr: {\"a\": 1} + ${env.B}}${env.C}"}}`), nil,
+		[]definition.Problem{missingEnv("scenarios[0].steps[0].request.url", "${env.C}")})
 }
